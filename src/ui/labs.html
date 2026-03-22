@@ -1,0 +1,661 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Diatom Labs</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Instrument+Serif:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap');
+
+    :root {
+      --ink:      #0e0e0e;
+      --ink-2:    #3a3a3a;
+      --ink-3:    #7a7a7a;
+      --ink-4:    #b0b0b0;
+      --paper:    #f5f3ef;
+      --paper-2:  #edeae4;
+      --paper-3:  #e2ddd6;
+      --accent:   #1a472a;
+      --accent-l: #2d6a40;
+      --amber:    #b85c00;
+      --red:      #8b1a1a;
+      --gold:     #8a6800;
+      --rule:     rgba(0,0,0,0.08);
+      --shadow:   0 1px 3px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04);
+      --r:        6px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { font-size: 14px; }
+
+    body {
+      font-family: 'DM Sans', system-ui, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      min-height: 100vh;
+    }
+
+    /* ── Header ────────────────────────────────────────────────────────────── */
+    .header {
+      border-bottom: 0.5px solid var(--rule);
+      padding: 28px 40px 24px;
+      display: flex;
+      align-items: flex-end;
+      gap: 32px;
+      position: sticky;
+      top: 0;
+      background: rgba(245,243,239,0.92);
+      backdrop-filter: blur(12px);
+      z-index: 100;
+    }
+
+    .header-left { flex: 1; }
+
+    .header-eyebrow {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      margin-bottom: 4px;
+    }
+
+    .header-title {
+      font-family: 'Instrument Serif', serif;
+      font-size: 28px;
+      font-weight: 400;
+      line-height: 1;
+      color: var(--ink);
+    }
+
+    .header-title em {
+      font-style: italic;
+      color: var(--accent);
+    }
+
+    .header-sub {
+      margin-top: 6px;
+      font-size: 12.5px;
+      color: var(--ink-3);
+      line-height: 1.5;
+      max-width: 480px;
+    }
+
+    .header-meta {
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .restart-banner {
+      display: none;
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      background: var(--amber);
+      color: #fff;
+      padding: 4px 10px;
+      border-radius: 3px;
+      margin-bottom: 8px;
+    }
+
+    .restart-banner.visible { display: block; }
+
+    .filter-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .filter-btn {
+      font-family: 'DM Mono', monospace;
+      font-size: 10.5px;
+      letter-spacing: 0.06em;
+      border: 0.5px solid var(--paper-3);
+      background: var(--paper-2);
+      color: var(--ink-2);
+      padding: 5px 11px;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .filter-btn:hover { background: var(--paper-3); }
+
+    .filter-btn.active {
+      background: var(--ink);
+      color: var(--paper);
+      border-color: var(--ink);
+    }
+
+    /* ── Warning strip ─────────────────────────────────────────────────────── */
+    .warning-strip {
+      margin: 20px 40px 0;
+      border: 0.5px solid rgba(184,92,0,0.25);
+      background: rgba(184,92,0,0.04);
+      border-radius: var(--r);
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .warning-strip-icon {
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .warning-strip-text {
+      font-size: 12px;
+      color: var(--ink-2);
+      line-height: 1.5;
+    }
+
+    .warning-strip-text strong {
+      color: var(--amber);
+      font-weight: 500;
+    }
+
+    /* ── Main grid ─────────────────────────────────────────────────────────── */
+    .grid {
+      padding: 28px 40px 60px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap: 14px;
+    }
+
+    /* ── Lab card ──────────────────────────────────────────────────────────── */
+    .lab-card {
+      background: #fff;
+      border: 0.5px solid var(--rule);
+      border-radius: var(--r);
+      padding: 18px 20px;
+      box-shadow: var(--shadow);
+      transition: box-shadow 0.2s, transform 0.2s;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .lab-card:hover {
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06);
+      transform: translateY(-1px);
+    }
+
+    .lab-card-head {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .lab-card-titles { flex: 1; }
+
+    .lab-name {
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--ink);
+      line-height: 1.3;
+    }
+
+    .lab-tags {
+      display: flex;
+      gap: 5px;
+      margin-top: 5px;
+      flex-wrap: wrap;
+    }
+
+    .tag {
+      font-family: 'DM Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 2px 7px;
+      border-radius: 3px;
+      font-weight: 400;
+    }
+
+    .tag-category {
+      background: var(--paper-2);
+      color: var(--ink-3);
+      border: 0.5px solid var(--paper-3);
+    }
+
+    .tag-alpha   { background: rgba(139,26,26,0.08); color: var(--red); border: 0.5px solid rgba(139,26,26,0.15); }
+    .tag-beta    { background: rgba(184,92,0,0.08);  color: var(--amber); border: 0.5px solid rgba(184,92,0,0.15); }
+    .tag-stable  { background: rgba(26,71,42,0.08); color: var(--accent); border: 0.5px solid rgba(26,71,42,0.15); }
+    .tag-version { background: var(--paper-2); color: var(--ink-4); border: 0.5px solid var(--paper-3); }
+
+    /* Toggle switch */
+    .toggle-wrap {
+      flex-shrink: 0;
+      padding-top: 1px;
+    }
+
+    .toggle {
+      position: relative;
+      width: 40px;
+      height: 22px;
+    }
+
+    .toggle input { opacity: 0; width: 0; height: 0; }
+
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: var(--paper-3);
+      border-radius: 11px;
+      cursor: pointer;
+      transition: background 0.2s;
+      border: 0.5px solid var(--rule);
+    }
+
+    .toggle input:checked + .toggle-track {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .toggle-track::after {
+      content: '';
+      position: absolute;
+      left: 3px;
+      top: 3px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+      transition: transform 0.2s cubic-bezier(0.4,0,0.2,1);
+    }
+
+    .toggle input:checked + .toggle-track::after {
+      transform: translateX(18px);
+    }
+
+    .lab-desc {
+      font-size: 12px;
+      color: var(--ink-2);
+      line-height: 1.6;
+    }
+
+    /* Risk strip */
+    .risk-strip {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 9px 11px;
+      border-radius: 4px;
+      margin-top: 2px;
+    }
+
+    .risk-low    { background: rgba(26,71,42,0.05); border: 0.5px solid rgba(26,71,42,0.12); }
+    .risk-medium { background: rgba(184,92,0,0.05); border: 0.5px solid rgba(184,92,0,0.12); }
+    .risk-high   { background: rgba(139,26,26,0.05); border: 0.5px solid rgba(139,26,26,0.12); }
+
+    .risk-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      margin-top: 4px;
+    }
+
+    .risk-low .risk-dot    { background: var(--accent); }
+    .risk-medium .risk-dot { background: var(--amber); }
+    .risk-high .risk-dot   { background: var(--red); }
+
+    .risk-text {
+      font-size: 11px;
+      color: var(--ink-3);
+      line-height: 1.5;
+    }
+
+    .risk-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 500;
+      display: block;
+      margin-bottom: 2px;
+    }
+
+    .risk-low .risk-label    { color: var(--accent); }
+    .risk-medium .risk-label { color: var(--amber); }
+    .risk-high .risk-label   { color: var(--red); }
+
+    /* Section dividers */
+    .section-header {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-top: 8px;
+    }
+
+    .section-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink-4);
+      white-space: nowrap;
+    }
+
+    .section-line {
+      flex: 1;
+      height: 0.5px;
+      background: var(--rule);
+    }
+
+    .section-count {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      color: var(--ink-4);
+    }
+
+    /* ── Empty state ───────────────────────────────────────────────────────── */
+    .empty-state {
+      grid-column: 1 / -1;
+      text-align: center;
+      padding: 60px 20px;
+    }
+
+    .empty-state-glyph {
+      font-family: 'Instrument Serif', serif;
+      font-size: 48px;
+      color: var(--paper-3);
+      display: block;
+      margin-bottom: 12px;
+    }
+
+    .empty-state-text {
+      font-size: 13px;
+      color: var(--ink-4);
+    }
+
+    /* ── Footer ─────────────────────────────────────────────────────────────── */
+    .footer {
+      border-top: 0.5px solid var(--rule);
+      padding: 16px 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .footer-left {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      color: var(--ink-4);
+      letter-spacing: 0.05em;
+    }
+
+    .footer-link {
+      font-size: 11px;
+      color: var(--ink-3);
+      text-decoration: none;
+      border-bottom: 0.5px solid var(--ink-4);
+      padding-bottom: 1px;
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .footer-link:hover { color: var(--ink); border-color: var(--ink); }
+
+    /* ── Reveal animation ───────────────────────────────────────────────────── */
+    @keyframes card-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .lab-card { animation: card-in 0.3s ease both; }
+
+    /* Stagger via nth-child */
+    .lab-card:nth-child(1)  { animation-delay: 0.00s; }
+    .lab-card:nth-child(2)  { animation-delay: 0.03s; }
+    .lab-card:nth-child(3)  { animation-delay: 0.06s; }
+    .lab-card:nth-child(4)  { animation-delay: 0.09s; }
+    .lab-card:nth-child(5)  { animation-delay: 0.12s; }
+    .lab-card:nth-child(6)  { animation-delay: 0.15s; }
+    .lab-card:nth-child(7)  { animation-delay: 0.18s; }
+    .lab-card:nth-child(8)  { animation-delay: 0.21s; }
+    .lab-card:nth-child(9)  { animation-delay: 0.24s; }
+    .lab-card:nth-child(10) { animation-delay: 0.27s; }
+    .lab-card:nth-child(11) { animation-delay: 0.30s; }
+    .lab-card:nth-child(12) { animation-delay: 0.33s; }
+
+    /* ── Responsive ─────────────────────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      .header { padding: 20px; flex-direction: column; align-items: flex-start; gap: 14px; }
+      .header-meta { text-align: left; }
+      .grid { padding: 16px 20px 40px; grid-template-columns: 1fr; }
+      .warning-strip { margin: 16px 20px 0; }
+      .footer { padding: 14px 20px; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="header">
+    <div class="header-left">
+      <div class="header-eyebrow">diatom://labs</div>
+      <h1 class="header-title">Experimental <em>Features</em></h1>
+      <p class="header-sub">
+        Precision instruments, not debug toggles. Each experiment is honest
+        about its stability and trade-offs.
+      </p>
+    </div>
+    <div class="header-meta">
+      <div class="restart-banner" id="restartBanner">↺ restart required</div>
+      <div class="filter-row" id="filterRow">
+        <button class="filter-btn active" data-cat="all">All</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="warning-strip">
+    <span class="warning-strip-icon">⚗️</span>
+    <p class="warning-strip-text">
+      <strong>These features are experimental.</strong>
+      Alpha features may break pages or behave unexpectedly.
+      Each card shows the risk level and what can go wrong.
+      Settings persist across restarts.
+    </p>
+  </div>
+
+  <main class="grid" id="grid">
+    <p style="color: var(--ink-4); font-size:13px; padding: 40px 0;">Loading labs…</p>
+  </main>
+
+  <footer class="footer">
+    <span class="footer-left" id="countLabel">— labs</span>
+    <a class="footer-link" href="https://github.com/Ansel-S/Diatom" target="_blank">View source on GitHub</a>
+  </footer>
+
+<script type="module">
+  // ── Data ─────────────────────────────────────────────────────────────────────
+  // In production: loaded from Tauri via __TAURI__.invoke('cmd_labs_list')
+  // Dev fallback: inline seed data
+
+  async function fetchLabs() {
+    if (window.__TAURI__) {
+      try {
+        return await window.__TAURI__.invoke('cmd_labs_list');
+      } catch(e) { /* fall through to seed */ }
+    }
+    return SEED_LABS;
+  }
+
+  async function setLab(id, enabled) {
+    if (window.__TAURI__) {
+      try {
+        return await window.__TAURI__.invoke('cmd_lab_set', { id, enabled });
+      } catch(e) { return false; }
+    }
+    return false; // no restart needed in dev
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  let allLabs = [];
+  let activeFilter = 'all';
+  let restartNeeded = false;
+
+  const grid        = document.getElementById('grid');
+  const filterRow   = document.getElementById('filterRow');
+  const countLabel  = document.getElementById('countLabel');
+  const restartBnr  = document.getElementById('restartBanner');
+
+  function stabilityTag(s) {
+    const map = { alpha: ['Alpha', 'tag-alpha'], beta: ['Beta', 'tag-beta'], stable: ['Stable', 'tag-stable'] };
+    const [label, cls] = map[s] || ['Unknown', 'tag-alpha'];
+    return `<span class="tag ${cls}">${label}</span>`;
+  }
+
+  function riskClass(r) {
+    return { low: 'risk-low', medium: 'risk-medium', high: 'risk-high' }[r] || 'risk-low';
+  }
+
+  function renderCard(lab) {
+    const riskCls  = riskClass(lab.risk);
+    const riskLbl  = lab.risk.charAt(0).toUpperCase() + lab.risk.slice(1) + ' Risk';
+    const checked  = lab.enabled ? 'checked' : '';
+    return `
+      <div class="lab-card" data-id="${lab.id}" data-cat="${lab.category}">
+        <div class="lab-card-head">
+          <div class="lab-card-titles">
+            <div class="lab-name">${lab.name}</div>
+            <div class="lab-tags">
+              <span class="tag tag-category">${lab.category}</span>
+              ${stabilityTag(lab.stability)}
+              <span class="tag tag-version">${lab.added_in}</span>
+            </div>
+          </div>
+          <label class="toggle-wrap">
+            <label class="toggle">
+              <input type="checkbox" ${checked} data-id="${lab.id}" data-restart="${lab.restart_required}">
+              <span class="toggle-track"></span>
+            </label>
+          </label>
+        </div>
+        <p class="lab-desc">${lab.description}</p>
+        <div class="risk-strip ${riskCls}">
+          <div class="risk-dot"></div>
+          <div class="risk-text">
+            <span class="risk-label">${riskLbl}</span>
+            ${lab.risk_note}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function buildCategoryDividers(labs) {
+    const cats = [...new Set(labs.map(l => l.category))];
+    const byCategory = {};
+    cats.forEach(c => byCategory[c] = labs.filter(l => l.category === c));
+    return { cats, byCategory };
+  }
+
+  function renderGrid() {
+    const filtered = activeFilter === 'all'
+      ? allLabs
+      : allLabs.filter(l => l.category === activeFilter);
+
+    if (filtered.length === 0) {
+      grid.innerHTML = `
+        <div class="empty-state">
+          <span class="empty-state-glyph">∅</span>
+          <p class="empty-state-text">No labs in this category.</p>
+        </div>`;
+      countLabel.textContent = '0 labs';
+      return;
+    }
+
+    const { cats, byCategory } = buildCategoryDividers(filtered);
+    let html = '';
+
+    if (activeFilter === 'all') {
+      cats.forEach(cat => {
+        const items = byCategory[cat];
+        html += `
+          <div class="section-header">
+            <span class="section-label">${cat}</span>
+            <div class="section-line"></div>
+            <span class="section-count">${items.length}</span>
+          </div>`;
+        items.forEach(lab => html += renderCard(lab));
+      });
+    } else {
+      filtered.forEach(lab => html += renderCard(lab));
+    }
+
+    grid.innerHTML = html;
+    countLabel.textContent = `${filtered.length} lab${filtered.length !== 1 ? 's' : ''}`;
+
+    // Wire up toggles
+    grid.querySelectorAll('input[type=checkbox]').forEach(input => {
+      input.addEventListener('change', async (e) => {
+        const id = e.target.dataset.id;
+        const enabled = e.target.checked;
+        const needsRestart = await setLab(id, enabled);
+
+        // Update local state
+        const lab = allLabs.find(l => l.id === id);
+        if (lab) lab.enabled = enabled;
+
+        if (needsRestart || e.target.dataset.restart === 'true') {
+          restartNeeded = true;
+          restartBnr.classList.add('visible');
+        }
+      });
+    });
+  }
+
+  function buildFilters() {
+    const cats = [...new Set(allLabs.map(l => l.category))];
+    const existing = filterRow.querySelectorAll('.filter-btn');
+    existing.forEach((b, i) => { if (i > 0) b.remove(); });
+
+    cats.forEach(cat => {
+      const btn = document.createElement('button');
+      btn.className = 'filter-btn';
+      btn.dataset.cat = cat;
+      btn.textContent = cat;
+      filterRow.appendChild(btn);
+    });
+
+    filterRow.querySelectorAll('.filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        filterRow.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeFilter = btn.dataset.cat;
+        renderGrid();
+      });
+    });
+  }
+
+  // ── Init ─────────────────────────────────────────────────────────────────
+  (async () => {
+    allLabs = await fetchLabs();
+    buildFilters();
+    renderGrid();
+  })();
+
+  // ── Seed data (dev fallback) ──────────────────────────────────────────────
+  const SEED_LABS = [
+    { id: 'slm_server', name: 'Local AI Microkernel', description: 'Starts an OpenAI-compatible API server at 127.0.0.1:11435, making Diatom\'s curated SLMs available to any local app.', category: 'AI', stability: 'beta', risk: 'low', risk_note: 'Opens a local TCP port. Bound to loopback — not accessible from the network.', enabled: false, restart_required: true, added_in: 'v0.9.0' },
+    { id: 'slm_extreme_privacy', name: 'AI Extreme Privacy Mode', description: 'Forces all AI inference to run in the Wasm sandbox. Disables Ollama and llama.cpp backends.', category: 'AI', stability: 'alpha', risk: 'low', risk_note: 'Wasm inference is 5–20× slower than native. Only works for short prompts.', enabled: false, restart_required: false, added_in: 'v0.9.0' },
+    { id: 'page_summarise', name: 'Instant Page Summariser', description: 'Adds a ⌘K shortcut that summarises the current page using the active SLM.', category: 'AI', stability: 'beta', risk: 'low', risk_note: 'Page content is sent to the local model only — never to external servers.', enabled: false, restart_required: false, added_in: 'v0.9.0' },
+    { id: 'dynamic_tab_budget', name: 'Adaptive Tab Limit', description: 'Replaces the fixed 10-tab limit with a memory-aware formula. Ultrawide monitors get up to 13 tabs; phones get 3.', category: 'Performance', stability: 'beta', risk: 'low', risk_note: 'Budget recalculates every 60 seconds.', enabled: true, restart_required: false, added_in: 'v0.9.0' },
+    { id: 'golden_ratio_zones', name: 'Golden Ratio Tab Zones', description: 'Divides your tab budget into a Focus zone (61.8%) and a Buffer zone (38.2%).', category: 'Performance', stability: 'beta', risk: 'low', risk_note: 'None. Cosmetic behavioural change only.', enabled: true, restart_required: false, added_in: 'v0.9.0' },
+    { id: 'entropy_sleep', name: 'Entropy-Reduction Sleep', description: 'As tabs approach the budget limit, the auto-sleep timer shortens and the heaviest tab is prioritised.', category: 'Performance', stability: 'stable', risk: 'low', risk_note: 'May surprise users who expect tabs to stay alive longer under load.', enabled: true, restart_required: false, added_in: 'v0.9.0' },
+    { id: 'pqc_envelope', name: 'Post-Quantum Freeze Encryption', description: 'Encrypts Museum bundles with Kyber-768 + AES-256-GCM hybrid envelope.', category: 'Privacy', stability: 'beta', risk: 'low', risk_note: 'Bundles encrypted with this flag cannot be decrypted by older Diatom versions.', enabled: false, restart_required: false, added_in: 'v0.8.0' },
+    { id: 'ohttp_decoy', name: 'OHTTP Decoy Relay', description: 'Routes privacy-noise requests through Oblivious HTTP relays (Cloudflare, Fastly, Brave).', category: 'Privacy', stability: 'alpha', risk: 'medium', risk_note: 'Response decapsulation not yet implemented — decoy requests only.', enabled: false, restart_required: false, added_in: 'v0.8.0' },
+    { id: 'zkp_age_gate', name: 'Zero-Knowledge Age Verification', description: 'Proves you are over 18 to participating sites without revealing your birth year.', category: 'Privacy', stability: 'alpha', risk: 'high', risk_note: 'Sites must opt-in to accept ZK-Proof headers.', enabled: false, restart_required: false, added_in: 'v0.8.0' },
+    { id: 'timezone_spoof', name: 'Timezone Normalisation', description: 'Overrides JavaScript timezone APIs to report UTC.', category: 'Privacy', stability: 'beta', risk: 'medium', risk_note: 'Calendar apps and trading platforms may display incorrect times.', enabled: false, restart_required: false, added_in: 'v0.9.0' },
+    { id: 'jitter_all_requests', name: 'Global Request Jitter', description: 'Adds 0–50ms cryptographic random delay to every outbound request.', category: 'Privacy', stability: 'stable', risk: 'low', risk_note: 'Adds up to 50ms latency per request.', enabled: false, restart_required: false, added_in: 'v0.8.0' },
+    { id: 'crdt_museum_sync', name: 'P2P Museum Sync', description: 'Synchronises frozen page archives between your devices using OR-Set CRDTs.', category: 'Sync', stability: 'alpha', risk: 'medium', risk_note: 'Requires manual export/import until the Mesh transport is complete.', enabled: false, restart_required: false, added_in: 'v0.8.0' },
+    { id: 'bloom_startup', name: 'Bloom Startup Animation', description: 'Displays a procedural geometric animation on first load. Pure CSS — zero JavaScript.', category: 'Interface', stability: 'stable', risk: 'low', risk_note: 'None.', enabled: true, restart_required: false, added_in: 'v0.9.0' },
+    { id: 'screen_gravity', name: 'Screen Gravity Tab Ceiling', description: 'Automatically adjusts the maximum tab count based on display width.', category: 'Interface', stability: 'beta', risk: 'low', risk_note: 'The ceiling adjusts within 60 seconds of a window resize.', enabled: true, restart_required: false, added_in: 'v0.9.0' },
+  ];
+</script>
+</body>
+</html>
