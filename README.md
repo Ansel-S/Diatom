@@ -1,1 +1,228 @@
 # Diatom
+
+**A minimalist, privacy-first, local-AI browser.**
+
+[![License: BUSL-1.1](https://img.shields.io/badge/License-BUSL--1.1-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-1.78+-orange.svg)](https://rustup.rs)
+[![Tauri](https://img.shields.io/badge/Tauri-2.x-purple.svg)](https://tauri.app)
+[![Binary](https://img.shields.io/badge/binary-%E2%89%A415MB-green.svg)](#)
+[![Status](https://img.shields.io/badge/status-v0.9.0_pre--release-yellow.svg)](CHANGELOG.md)
+
+Most browsers are a window that lets you see the internet. Diatom is a filter that keeps the internet from seeing you.
+
+It is not trying to replace Chrome. It is for people who have noticed that every scroll, every click, and every pause is being quietly recorded by dozens of third-party systems — and who have decided their attention is worth more than that.
+
+---
+
+## Why Diatom
+
+The diatom is a single-celled alga that builds precise geometric shells from silica. In nature's smallest things, the most rigorous architecture. The name is a reminder: **restraint is a form of strength**.
+
+Diatom runs entirely on your device. No accounts. No cloud sync. No analytics. No ads. No telemetry. Ever.
+
+---
+
+## Hard limits (enforced in code, not just policy)
+
+| Constraint | Enforcement |
+|---|---|
+| Zero data upload, no exceptions | `AppState` has no outbound API endpoints |
+| Zen Mode 50-character unlock ritual — never removable | `zen.js` character check has no bypass path |
+| No centralised sync server, ever | Architecture constraint: Mesh uses mDNS/BLE only |
+| Binary size ≤ 15 MB | CI gate: build fails if exceeded |
+| No Blink/Chromium bundled | Size budget enforcement: Blink ≈ 200 MB, budget = 15 MB |
+| No WebExtensions compatibility layer | Absorptive architecture: features enter the kernel, not the extension store |
+| WebUSB / WebMIDI permanently disabled | `sw.js` + `diatom-api.js`: physical boundary |
+
+---
+
+## Features
+
+| Feature | Description |
+|---|---|
+| **Native ad blocking** | Aho-Corasick automaton — tracker requests are dropped before they reach the renderer |
+| **Fingerprint noise** | Canvas / WebGL / Audio micro-perturbation; seed rotates per workspace. Bluetooth audio gets adaptive low-amplitude noise to avoid audio jitter |
+| **E-WBN encrypted archive** | AES-256-GCM + tracker stripping + TF-IDF indexing + FTS5 full-text search. Freeze any page to your personal Museum |
+| **Native RSS** | Zero plugins. RSS 2.0 / Atom parser with TF-IDF auto-tagging and reading mode |
+| **Built-in 2FA** | TOTP/HOTP engine that auto-detects 2FA forms and fills in the code |
+| **Local AI (Resonance Modes)** | OpenAI-compatible server at `127.0.0.1:11435`. Curated models: Qwen 2.5 3B, Phi-4 Mini, Gemma 3 4B. Other local apps (VS Code, Obsidian) can use Diatom as their AI backend |
+| **The Echo** | Weekly persona spectrum (Scholar / Builder / Leisure) computed entirely on-device in a Wasm sandbox. Raw data is zeroed after computation. No data leaves the device |
+| **DOM Crusher** | Ctrl+click any page element to permanently hide it. Rules persist per-domain |
+| **Zen Mode** | Blocks social and entertainment sites during focus sessions. Unlocking requires typing a 50-character intent declaration — this is a ritual, not a barrier |
+| **Vision Overlay** | Alt+drag to select any screen region → local Tesseract OCR → optional local translation |
+| **Ghost Redirect** | When offline, semantically matches the failed URL against your personal Museum and surfaces similar archived pages |
+| **Compatibility Router** | Detects broken pages and offers a clean system browser handoff (tracking parameters stripped before handing off) |
+| **Accessibility** | Full ARIA injection + keyboard navigation for every chrome element |
+| **Adaptive tab budget** | Three interlocking models: resource-aware scaling, golden ratio zones (Focus 61.8% / Buffer 38.2%), and screen gravity (3 tabs on phone → 13 on ultrawide) |
+| **diatom://labs** | 14 experimental features — AI, privacy, performance, sync, interface — each with an honest stability and risk rating |
+
+---
+
+## Honest limitations
+
+Diatom has edges. We tell you where they are.
+
+**Permanently out of scope (architecture or legal constraints):**
+- Widevine L1/L3 on Linux — Google does not license the CDM to open-source projects
+- Full iOS App Store distribution — Apple policy blocks custom Wasm kernels
+- WebExtensions API — incompatible with the binary size budget and security model
+- Bank U-Shield / NPAPI plugins — non-standard proprietary interfaces
+
+**System browser handoff** — for these cases, `cmd_compat_handoff` strips tracking parameters before yielding the render:
+- Legacy enterprise intranets with broken layout
+- Banking pages requiring hardware token plugins
+- DRM streaming (4K Netflix, etc.)
+
+Privacy protection extends to the last moment before leaving Diatom.
+
+---
+
+## Getting started
+
+### Prerequisites
+
+```bash
+# Rust stable
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Tauri CLI v2
+cargo install tauri-cli --version "^2" --locked
+```
+
+### Platform dependencies
+
+```bash
+# macOS
+xcode-select --install
+
+# Linux (Ubuntu / Debian)
+sudo apt install libwebkit2gtk-4.1-dev build-essential curl \
+  libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+
+# Windows
+# Install WebView2 Runtime (built into Windows 11)
+# https://developer.microsoft.com/microsoft-edge/webview2/
+```
+
+### Development
+
+```bash
+git clone https://github.com/Ansel-S/Diatom.git
+cd Diatom
+cargo tauri dev
+```
+
+### Production build
+
+```bash
+cargo tauri build
+# Output: ≤ 15 MB binary
+# macOS:   Diatom.app + .dmg
+# Windows: Diatom.exe + .msi
+# Linux:   diatom.deb + .AppImage
+```
+
+---
+
+## Local AI setup (optional)
+
+```bash
+# Install Ollama
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Pull a curated model
+ollama pull phi4-mini          # recommended — balanced speed and quality
+ollama pull qwen2.5:3b         # faster, lower memory
+ollama pull gemma3:4b          # longer context, multilingual
+```
+
+Once Ollama is running, Diatom auto-detects it. No configuration needed.
+
+Resonance Mode shortcuts (address bar):
+- `/scholar <question>` — answer from your local Museum only
+- `/debug <code>` — architecture and code analysis
+- `/scribe <draft>` — writing and editing
+- `/oracle <question>` — pure logical reasoning
+
+**Extreme Privacy Mode** — enable in `diatom://labs` to force all inference into the Wasm sandbox: no filesystem access, no network, only in-memory page content.
+
+---
+
+## Wasm toolbox (no network required)
+
+Type directly in the address bar:
+
+```
+/json     Format and validate JSON
+/crypto   Base64 / SHA-256 / Hex conversion
+/math     Symbolic computation + unit conversion
+/img      Local image compression (MozJPEG / WebP)
+```
+
+---
+
+## Project structure
+
+```
+Diatom/
+├── src-tauri/
+│   ├── src/
+│   │   ├── main.rs           Tauri entry + module registration
+│   │   ├── db.rs             SQLite (single connection, WAL, migrations)
+│   │   ├── state.rs          AppState — one managed struct for everything
+│   │   ├── commands.rs       All IPC commands (thin wrappers only)
+│   │   ├── blocker.rs        Aho-Corasick ad-blocking automaton
+│   │   ├── tabs.rs           Tab lifecycle + LZ4 ZRAM sleep
+│   │   ├── echo.rs           Persona spectrum + information nutrition
+│   │   ├── freeze.rs         E-WBN: AES-GCM + tracker strip + gzip
+│   │   ├── slm.rs            Local AI microkernel (:11435)
+│   │   ├── labs.rs           Experimental feature registry
+│   │   ├── tab_budget.rs     Adaptive tab limit engine
+│   │   ├── war_report.rs     Anti-tracking narrative report
+│   │   ├── dom_crusher.rs    CSS selector validation
+│   │   ├── zen.rs            Zen Mode state machine + domain classifier
+│   │   ├── threat.rs         Quad9 DoH + local threat list
+│   │   ├── decoy.rs          Privacy noise injection (robots.txt compliant)
+│   │   ├── compliance.rs     Informed-consent gates for sensitive features
+│   │   ├── compat.rs         Broken-page detection + system browser handoff
+│   │   ├── a11y.rs           ARIA injection + keyboard navigation
+│   │   └── storage_guard.rs  Archive budget + LRU eviction
+│   ├── resources/
+│   │   └── diatom-api.js     Injected into every page
+│   └── Cargo.toml
+│
+├── src/
+│   ├── main.js               Boot sequence
+│   ├── sw.js                 Service Worker (intercept + Ghost Redirect + Zen)
+│   ├── index.html            Browser chrome
+│   ├── diatom.css            Global styles
+│   ├── browser/              Core browser modules (ipc, tabs, hotkey, lustre…)
+│   ├── features/             Feature panels (echo, zen, dom-crusher…)
+│   ├── workers/
+│   │   └── core.worker.js   TF-IDF + OPFS + Echo scheduler + idle indexing
+│   └── ui/
+│       ├── about.html        diatom://about
+│       └── labs.html         diatom://labs
+│
+├── PHILOSOPHY.md             Product constitution — 12 permanent prohibitions
+├── CHANGELOG.md              Development history v0.1.0 → present
+└── LICENSE                   BUSL-1.1, Change Date 2028, Change License MIT
+```
+
+---
+
+## Contributing
+
+Read [PHILOSOPHY.md](PHILOSOPHY.md) before opening a PR. Every change must pass the 12 prohibitions — the CI will catch most violations automatically.
+
+Bug reports and feature requests: [github.com/Ansel-S/Diatom/issues](https://github.com/Ansel-S/Diatom/issues)
+
+---
+
+## License
+
+[Business Source License 1.1](LICENSE) — source-available, not open-source.
+
+- Personal use, research, and contributing to this repository: **always free**
+- Commercial browser products incorporating Diatom's features: **requires a separate licence**
+- Change Date: 2028. After that, the code converts to **MIT** permanently.
