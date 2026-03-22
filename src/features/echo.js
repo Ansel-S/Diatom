@@ -40,7 +40,7 @@ export async function maybeShowEchoHint() {
 
   const hint = el('span', 'echo-hint');
   hint.textContent = '🍃';
-  hint.title = '你的 Diatom 回声已就绪';
+  hint.title = 'Your Diatom Echo is ready';
   hint.style.cssText = 'opacity:.5;cursor:pointer;font-size:1.1rem;margin-left:.5rem;transition:opacity .2s';
   hint.addEventListener('mouseenter', () => hint.style.opacity = '1');
   hint.addEventListener('mouseleave', () => hint.style.opacity = '.5');
@@ -109,7 +109,7 @@ function buildPanel(echo, war) {
   wrap.innerHTML += `
     <div class="echo-header" style="margin-bottom:2.5rem">
       <p style="font-family:'Playfair Display',Georgia,serif;font-size:2rem;font-weight:700;
-                color:#e8e8f0;margin:0 0 .25rem">${escHtml(echo.week_iso)} 回声</p>
+                color:#e8e8f0;margin:0 0 .25rem">${escHtml(echo.week_iso)} Echo</p>
       <p style="color:#888;font-size:.85rem;margin:0;letter-spacing:.06em">PERSONA · NUTRITION · WAR REPORT</p>
     </div>
   `;
@@ -132,7 +132,7 @@ function buildPanel(echo, war) {
 // ── Persona Spectrum ──────────────────────────────────────────────────────────
 
 function buildSpectrumSection(spectrum) {
-  const sec = sectionEl('人格光谱');
+  const sec = sectionEl('Persona Spectrum');
 
   // Continuous gradient bar — NO pie chart, NO bar chart
   const barWrap = el('div');
@@ -154,9 +154,9 @@ function buildSpectrumSection(spectrum) {
   const labels = el('div');
   labels.style.cssText = 'display:flex;justify-content:space-between;margin-top:.4rem;font-size:.75rem;color:#888;';
   labels.innerHTML = `
-    <span>🎓 学术  ${pct(spectrum.scholar)}</span>
-    <span>⚙️ 生产  ${pct(spectrum.builder)}</span>
-    <span>🌿 休闲  ${pct(spectrum.leisure)}</span>
+    <span>🎓 Scholar  ${pct(spectrum.scholar)}</span>
+    <span>⚙️ Builder  ${pct(spectrum.builder)}</span>
+    <span>🌿 Leisure  ${pct(spectrum.leisure)}</span>
   `;
   barWrap.appendChild(labels);
 
@@ -166,7 +166,7 @@ function buildSpectrumSection(spectrum) {
     delta.style.cssText = 'font-size:.8rem;color:#94a3b8;margin:.6rem 0 0;';
     const dir = spectrum.scholar_delta > 0 ? '↑' : '↓';
     const ppp = Math.abs(Math.round(spectrum.scholar_delta * 100));
-    delta.textContent = `${dir} 与上周相比，学术向权重变化了 ${ppp} 个百分点。`;
+    delta.textContent = `${dir} Scholar weight shifted by ${ppp} percentage points compared to last week.`;
     barWrap.appendChild(delta);
   }
 
@@ -177,7 +177,7 @@ function buildSpectrumSection(spectrum) {
 // ── Generative Diatom ─────────────────────────────────────────────────────────
 
 function buildDiatomSection(echo) {
-  const sec = sectionEl('本周形态');
+  const sec = sectionEl('This Week\'s Form');
 
   const canvas = el('canvas', 'diatom-canvas');
   canvas.width  = 320;
@@ -200,13 +200,13 @@ function buildDiatomSection(echo) {
 // ── Information Nutrition ─────────────────────────────────────────────────────
 
 function buildNutritionSection(n) {
-  const sec = sectionEl('信息营养');
+  const sec = sectionEl('Information Nutrition');
 
   const rows = [
-    { label: '深度阅读',   value: n.deep_ratio,        color: '#60a5fa', icon: '📗' },
-    { label: '有意阅读',   value: n.intentional_ratio,  color: '#a78bfa', icon: '🎯' },
-    { label: '浅层消费',   value: n.shallow_ratio,      color: '#fb923c', icon: '📱' },
-    { label: '噪音拦截',   value: n.noise_ratio,        color: '#f87171', icon: '🚫' },
+    { label: 'Deep Reading',   value: n.deep_ratio,        color: '#60a5fa', icon: '📗' },
+    { label: 'Intentional Reading',   value: n.intentional_ratio,  color: '#a78bfa', icon: '🎯' },
+    { label: 'Shallow Consumption',   value: n.shallow_ratio,      color: '#fb923c', icon: '📱' },
+    { label: 'Noise Blocked',   value: n.noise_ratio,        color: '#f87171', icon: '🚫' },
   ];
 
   const grid = el('div');
@@ -238,13 +238,13 @@ function buildNutritionSection(n) {
 // ── War Report ────────────────────────────────────────────────────────────────
 
 function buildWarSection(war) {
-  const sec = sectionEl('Diatom 战报');
+  const sec = sectionEl('Diatom War Report');
 
   const stats = [
     { value: war.tracking_blocks,  narrative: war.block_narrative  },
     { value: war.noise_injections, narrative: war.noise_narrative  },
     { value: `${war.ram_saved_mb.toFixed(0)} MB`, narrative: war.ram_narrative  },
-    { value: `${war.time_saved_min.toFixed(0)} 分`, narrative: war.time_narrative },
+    { value: `${war.time_saved_min.toFixed(0)} min`, narrative: war.time_narrative },
   ];
 
   for (const s of stats) {

@@ -39,21 +39,21 @@ export function ensureDisclaimer() {
     overlay.innerHTML = `
       <div style="max-width:480px; color:#94a3b8; font-size:.85rem; line-height:1.65;">
         <h2 style="color:#e2e8f0; font-size:1.1rem; margin:0 0 1rem; font-family:'Playfair Display',Georgia,serif;">
-          关于 Diatom 回声
+          About Diatom Echo
         </h2>
-        <p>回声（The Echo）在你的设备上本地计算，不向任何服务器上传数据。
-        所有分析仅基于你主动使用浏览器的行为，且在计算完成后原始数据会被清零。</p>
-        <p style="margin-top:.75rem;">人格光谱（Persona Spectrum）是一种
-        <strong style="color:#e2e8f0;">自我反思工具</strong>，
-        不构成心理诊断意见，亦不代表任何专业评估。
-        其结论仅供个人参考。</p>
-        <p style="margin-top:.75rem;">你可以随时从设置中导出或删除全部 Echo 数据。</p>
+        <p>The Echo computes locally on your device and uploads no data to any server.
+        All analysis is based solely on your active browsing behaviour, and raw data is zeroed out after computation.</p>
+        <p style="margin-top:.75rem;">The Persona Spectrum is a
+        <strong style="color:#e2e8f0;">self-reflection tool</strong>,
+        not a psychological diagnosis or professional assessment.
+        Its findings are for personal reference only.</p>
+        <p style="margin-top:.75rem;">You can export or delete all Echo data from settings at any time.</p>
         <button id="echo-disclaimer-ok" style="
           display:block; margin-top:1.5rem; width:100%;
           background:#1e3a5f; color:#e2e8f0; border:none;
           border-radius:.4rem; padding:.65rem; font:500 .85rem 'Inter',system-ui;
           cursor:pointer;
-        ">我了解，继续</button>
+        ">Understood, continue</button>
       </div>
     `;
 
@@ -79,32 +79,32 @@ export async function exportEchoData() {
   try {
     echoOutput = await invoke('cmd_echo_compute');
   } catch (err) {
-    alert('导出失败：' + err.message);
+    alert('Export failed: ' + err.message);
     return;
   }
 
   const exportObj = {
     export_format_version: 1,
     generated_at: new Date().toISOString(),
-    disclaimer: "本数据为行为聚合摘要，不含任何原始 URL 或页面标题。计算在本地设备完成，从未上传至任何服务器。",
+    disclaimer: "This data is a behavioural aggregation summary containing no raw URLs or page titles. Computation is performed locally on your device and has never been uploaded to any server.",
     methodology: {
-      scholar_axis:  "深度阅读时间 + 学术/文献域名权重（含衰减函数）",
-      builder_axis:  "代码/工具域名权重 + 多标签切换模式（coding workflow 信号）",
-      leisure_axis:  "快速滚动 / 短停留时间 / 社交媒体域名权重",
-      recency_decay: "3天半衰期指数衰减——近期行为权重高于早期",
+      scholar_axis:  "Deep reading time + academic/reference domain weights (with recency decay)",
+      builder_axis:  "Code/tooling domain weights + multi-tab switching patterns (coding workflow signal)",
+      leisure_axis:  "High scroll velocity / short dwell time / social media domain weights",
+      recency_decay: "Exponential decay with 3-day half-life — recent behaviour is weighted higher than older",
       nutrition_tiers: {
-        deep:        "阅读模式开启 + 停留≥120秒 + 滚动速度<10px/s",
-        intentional: "阅读模式开启 + RSS来源",
-        shallow:     "停留<15秒 或 滚动速度>80px/s 或 标签切换≥5次",
-        noise:       "被拦截的追踪域名访问尝试",
+        deep:        "Reading mode active + dwell ≥120s + scroll velocity <10px/s",
+        intentional: "Reading mode active + RSS source",
+        shallow:     "Dwell <15s or scroll velocity >80px/s or tab switches ≥5",
+        noise:       "Blocked tracking domain access attempts",
       }
     },
     results: echoOutput,
     legal: {
       gdpr_article: 15,
-      right_to_access: "本导出文件满足GDPR第15条访问权要求。",
-      right_to_erasure: "在 Diatom 设置 → Echo → 删除所有数据 可行使第17条删除权。",
-      no_automated_decision: "Diatom 回声不产生具有法律效力的自动化决策。"
+      right_to_access: "This export satisfies the GDPR Article 15 right of access.",
+      right_to_erasure: "Exercise your Article 17 right to erasure via Diatom Settings → Echo → Delete all data.",
+      no_automated_decision: "Diatom Echo does not produce automated decisions with legal effect."
     }
   };
 
@@ -128,7 +128,7 @@ export async function exportEchoData() {
  */
 export async function deleteAllEchoData() {
   const confirmed = confirm(
-    '确认删除所有 Echo 数据？\n\n这将清除本地人格光谱记录和所有阅读行为事件。操作不可撤销。'
+    'Delete all Echo data?\n\nThis will clear your local persona spectrum records and all reading events. This action cannot be undone.'
   );
   if (!confirmed) return;
 
@@ -139,8 +139,8 @@ export async function deleteAllEchoData() {
     await invoke('cmd_setting_set', { key: 'echo_data_deleted_at', value: String(Date.now()) });
     // The next Echo compute will find no events and return defaults
     sessionStorage.removeItem(DISCLAIMER_KEY);
-    alert('✓ 所有 Echo 数据已删除。');
+    alert('✓ All Echo data has been deleted.');
   } catch (err) {
-    alert('删除失败：' + err.message);
+    alert('Deletion failed: ' + err.message);
   }
 }

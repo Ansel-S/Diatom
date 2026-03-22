@@ -35,13 +35,13 @@ pub struct FeatureLegal {
 pub static FEATURE_LEGAL_REGISTRY: &[FeatureLegal] = &[
     FeatureLegal {
         id: "decoy_traffic",
-        display_name: "隐私噪声注入",
+        display_name: "Privacy Noise Injection",
         legal_class: "Defensive privacy noise — equivalent to a browser's fingerprint randomisation. \
                       NOT commercial click fraud: no ad clicks, no form submissions, no revenue diversion.",
         requires_consent: true,
-        consent_text: "隐私噪声注入会在后台向公开网页发送匿名请求，以干扰广告追踪画像。\
-                       所有请求严格遵守目标网站的 robots.txt，且不超过每8秒1次/每个域名。\
-                       此功能不模拟广告点击或任何商业行为。",
+        consent_text: "Privacy noise injection sends anonymous requests to public pages in the background to disrupt ad tracking profiles. \
+                       All requests strictly comply with the target site's robots.txt, capped at 1 request per 8 seconds per domain. \
+                       This feature does not simulate ad clicks or any commercial behaviour.",
         controls: &[
             "robots.txt compliance enforced in decoy.rs before every request",
             "rate limit: max 1 req/8s per domain, max 3 domains per session",
@@ -54,7 +54,7 @@ pub static FEATURE_LEGAL_REGISTRY: &[FeatureLegal] = &[
     },
     FeatureLegal {
         id: "dom_crusher",
-        display_name: "DOM Crusher（元素永久屏蔽）",
+        display_name: "DOM Crusher (Permanent Element Blocking)",
         legal_class: "User Stylesheet — legally identical to a browser's 'Reader mode' or \
                       user-defined CSS overrides. Hides elements via display:none; does NOT \
                       delete, modify, or redistribute page content.",
@@ -71,7 +71,7 @@ pub static FEATURE_LEGAL_REGISTRY: &[FeatureLegal] = &[
     },
     FeatureLegal {
         id: "ghost_redirect",
-        display_name: "Ghost Redirect（离线语义回退）",
+        display_name: "Ghost Redirect (Offline Semantic Fallback)",
         legal_class: "Local file search — equivalent to macOS Spotlight surfacing a locally \
                       cached file. Only surfaces content the USER personally froze on their \
                       own device. Does not fetch, mirror, or distribute third-party content.",
@@ -90,14 +90,14 @@ pub static FEATURE_LEGAL_REGISTRY: &[FeatureLegal] = &[
     },
     FeatureLegal {
         id: "echo_analysis",
-        display_name: "The Echo（人格演化回声）",
+        display_name: "The Echo (Persona Evolution Reflection)",
         legal_class: "Local self-reflection tool. All computation runs on-device in a Wasm \
                       sandbox. No data is transmitted to any server. Not a medical or \
                       psychological diagnostic tool.",
         requires_consent: true,
-        consent_text: "回声（The Echo）在你的设备上本地计算，不向任何服务器上传数据。\
-                       分析结果仅供个人自我反思，不构成心理诊断意见，亦不代表任何专业评估。\
-                       你可以随时导出或删除所有 Echo 数据。",
+        consent_text: "The Echo computes locally on your device and uploads no data to any server. \
+                       Its results are for personal self-reflection only — not a psychological diagnosis or professional assessment. \
+                       You can export or delete all Echo data at any time.",
         controls: &[
             "all computation in Wasm sandbox with no filesystem/network access",
             "raw reading events are purged after Echo computation via memzero",
@@ -113,7 +113,7 @@ pub static FEATURE_LEGAL_REGISTRY: &[FeatureLegal] = &[
     },
     FeatureLegal {
         id: "mesh_sync",
-        display_name: "Diatom Mesh（局域网同步）",
+        display_name: "Diatom Mesh (Local Network Sync)",
         legal_class: "Private P2P local network protocol — equivalent to AirDrop. \
                       No central index server. Device discovery via mDNS (LAN only).",
         requires_consent: false,

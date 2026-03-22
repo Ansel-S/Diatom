@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // diatom/src-tauri/src/compat.rs  — v7.2  RED-1
 //
-// Compatibility Router — "向上靠不能变成自我放逐"
+// Compatibility Router — "Adapting upward must not become self-exile"
 //
 // Problem: Sites using non-standard JS frameworks, enterprise intranet
 //          systems, and government portals break on Servo/WebKit.
@@ -134,11 +134,11 @@ pub fn compat_hint_banner(domain: &str) -> String {
           background:#1e293b;border-bottom:1px solid rgba(245,158,11,.3);
           color:#fbbf24;font:500 12px/1.5 'Inter',system-ui;
           padding:6px 12px;display:flex;align-items:center;gap:8px;">
-          <span>⚠ Diatom 检测到此页面可能存在兼容性问题</span>
+          <span>⚠ Diatom detected a potential compatibility issue with this page</span>
           <button onclick="window.__diatom_compat_handoff('{}');"
             style="margin-left:auto;background:#b45309;color:#fff;border:none;
                    border-radius:3px;padding:3px 8px;cursor:pointer;font-size:11px;">
-            在系统浏览器中打开
+            Open in system browser
           </button>
           <button onclick="document.getElementById('__diatom_compat').remove();"
             style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:14px;">

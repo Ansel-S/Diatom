@@ -222,7 +222,7 @@ function showHighlight(target) {
   `;
 
   const label = document.createElement('span');
-  label.textContent = '点击粉碎';
+  label.textContent = 'Click to crush';
   label.style.cssText = `
     position:absolute; top:2px; left:4px;
     font:500 10px/1 'Inter',system-ui,sans-serif;
@@ -247,7 +247,7 @@ function flashConfirmation(selector) {
     pointer-events:none;
     animation: fade-out-up 1.8s ease forwards;
   `;
-  msg.textContent = `已永久屏蔽 · ${selector.slice(0, 48)}`;
+  msg.textContent = `Permanently blocked · ${selector.slice(0, 48)}`;
 
   ensureFadeStyle();
   document.body.appendChild(msg);
@@ -264,7 +264,7 @@ function showRejectionHint(reason) {
     pointer-events:none;
     animation: fade-out-up 2.5s ease forwards;
   `;
-  msg.textContent = `选择器被拒绝：${reason}`;
+  msg.textContent = `Selector rejected: ${reason}`;
   ensureFadeStyle();
   document.body.appendChild(msg);
   setTimeout(() => msg.remove(), 2600);
@@ -299,7 +299,7 @@ export async function showCrusherRules() {
     return;
   }
   if (!rules.length) {
-    alert(`${domain} 上暂无已屏蔽的元素。`);
+    alert(`No blocked elements on ${domain}.`);
     return;
   }
 
@@ -314,7 +314,7 @@ export async function showCrusherRules() {
   `;
   panel.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem;">
-      <span style="font-weight:600;color:#e8e8f0;">${domain} 的屏蔽规则</span>
+      <span style="font-weight:600;color:#e8e8f0;">Block rules for ${domain}</span>
       <button id="crusher-close" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:1rem;">✕</button>
     </div>
   `;

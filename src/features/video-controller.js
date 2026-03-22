@@ -171,7 +171,7 @@ export function showSpeedBadge(speed) {
       font:600 10px/1 'Inter',system-ui; letter-spacing:.04em;
       cursor:pointer; transition:opacity .2s;
     `;
-    badge.title = 'S = 减速 · D = 加速 · R = 重置 · Z/X = 跳10秒';
+    badge.title = 'S = slow down · D = speed up · R = reset · Z/X = skip 10s';
     const omniArea = document.querySelector('#omnibox-right');
     if (omniArea) omniArea.appendChild(badge);
   }

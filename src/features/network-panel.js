@@ -98,7 +98,7 @@ export function openNetworkPanel() {
 
   const filterInput = el('input');
   filterInput.type        = 'text';
-  filterInput.placeholder = '过滤 URL 或规则…';
+  filterInput.placeholder = 'Filter URL or rule…';
   filterInput.style.cssText = `
     flex:1; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.1);
     border-radius:.3rem; color:#e2e8f0; padding:.25rem .5rem; font:13px 'Inter',system-ui;
@@ -114,16 +114,16 @@ export function openNetworkPanel() {
     background:none; border:1px solid rgba(255,255,255,.15); border-radius:.3rem;
     color:#94a3b8; font:500 .75rem 'Inter',system-ui; padding:.25rem .6rem; cursor:pointer;
   `;
-  pauseBtn.textContent = '⏸ 暂停';
+  pauseBtn.textContent = '⏸ Pause';
   pauseBtn.addEventListener('click', () => {
     _paused = !_paused;
-    pauseBtn.textContent = _paused ? '▶ 继续' : '⏸ 暂停';
+    pauseBtn.textContent = _paused ? '▶ Resume' : '⏸ Pause';
     pauseBtn.style.color = _paused ? '#f87171' : '#94a3b8';
   });
 
   const clearBtn = el('button');
   clearBtn.style.cssText = pauseBtn.style.cssText;
-  clearBtn.textContent = '🗑 清空';
+  clearBtn.textContent = '🗑 Clear';
   clearBtn.addEventListener('click', () => { _entries = []; rebuildTable(); });
 
   const countBadge = el('span', 'devnet-count');
@@ -144,8 +144,8 @@ export function openNetworkPanel() {
     font-size:.68rem; color:#475569; letter-spacing:.06em; text-transform:uppercase;
   `;
   thead.innerHTML = `
-    <span>#</span><span>方法</span><span>URL</span>
-    <span>状态</span><span>时长</span><span>拦截规则</span>
+    <span>#</span><span>Method</span><span>URL</span>
+    <span>Status</span><span>Duration</span><span>Block Rule</span>
   `;
 
   // Table body
@@ -166,7 +166,7 @@ export function openNetworkPanel() {
   setInterval(() => {
     if (countBadge) {
       const visible = _entries.filter(matchesFilter).length;
-      countBadge.textContent = `${visible} / ${_entries.length} 条请求`;
+      countBadge.textContent = `${visible} / ${_entries.length} requests`;
     }
   }, 500);
 }

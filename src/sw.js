@@ -234,8 +234,8 @@ function buildGhostPage(failedUrl, matches) {
   const items = matches.map(m => {
     // Staleness warning: content frozen > 30 days ago gets a flag
     const staleWarning = m.ageDays > 30
-      ? `<span style="color:#d97706;font-size:.72rem;margin-left:.4rem;" title="此存档已超过30天">⚠ ${m.ageDays}天前存档</span>`
-      : (m.ageDays > 0 ? `<span style="color:#64748b;font-size:.72rem;margin-left:.4rem;">${m.ageDays}天前</span>` : '');
+      ? `<span style="color:#d97706;font-size:.72rem;margin-left:.4rem;" title="This archive is over 30 days old">⚠ Archived ${m.ageDays}d ago</span>`
+      : (m.ageDays > 0 ? `<span style="color:#64748b;font-size:.72rem;margin-left:.4rem;">${m.ageDays}d ago</span>` : '');
 
     return `
     <li>
@@ -249,11 +249,11 @@ function buildGhostPage(failedUrl, matches) {
   `}).join('');
 
   return `<!DOCTYPE html>
-<html lang="zh">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>此内容尚未存档</title>
+  <title>Content Not Yet Archived</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -282,12 +282,12 @@ function buildGhostPage(failedUrl, matches) {
 </head>
 <body>
   <div class="card">
-    <h1>此路径尚未锚定</h1>
-    <p>你在离线状态下访问了一个未存档的页面。以下是你<strong>本地档案馆</strong>中语义相关的内容。</p>
+    <h1>This Path Has Not Been Archived</h1>
+    <p>You navigated to an unarchived page while offline. Here is semantically related content from your <strong>local Museum</strong>.</p>
     <div class="url">${escHtml(failedUrl)}</div>
-    <h2>你的档案馆中的近似内容</h2>
+    <h2>Approximate matches in your Museum</h2>
     <ul>${items}</ul>
-    <p class="stale-note">⚠ 标记的存档已超过30天。内容可能与当前网页有所不同，请以最新在线版本为准。</p>
+    <p class="stale-note">⚠ Flagged archives are over 30 days old. Content may differ from the current live page — treat the online version as authoritative.</p>
   </div>
 </body>
 </html>`;
@@ -475,8 +475,8 @@ function zenInterstitialResponse(url, category) {
 function threatInterstitial(url) {
   const domain = hostOf(url);
   const html = `<!DOCTYPE html>
-<html lang="zh">
-<head><meta charset="UTF-8"><title>安全警告</title>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Security Warning</title>
 <style>
   body{background:#0a0a10;color:#f87171;font-family:'Inter',system-ui,sans-serif;
        display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;}
@@ -489,10 +489,10 @@ function threatInterstitial(url) {
 </head>
 <body>
 <div class="card">
-  <h1>⚠ 威胁情报拦截</h1>
-  <p>独立威胁情报将 <code>${escHtml(domain)}</code> 标记为恶意域名。</p>
-  <p>如果你确认这是误报，可以在 Diatom 信任域名设置中为此域名添加白名单。</p>
-  <p><a href="javascript:history.back()">← 返回上一页</a></p>
+  <h1>⚠ Threat Intelligence Block</h1>
+  <p>Independent threat intelligence has flagged <code>${escHtml(domain)}</code> as a malicious domain.</p>
+  <p>If you believe this is a false positive, you can allowlist this domain in Diatom's trust settings.</p>
+  <p><a href="javascript:history.back()">← Go back</a></p>
 </div>
 </body></html>`;
   return new Response(html, {
@@ -503,8 +503,8 @@ function threatInterstitial(url) {
 
 function offlinePage(failedUrl) {
   const html = `<!DOCTYPE html>
-<html lang="zh">
-<head><meta charset="UTF-8"><title>离线</title>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Offline</title>
 <style>
   body{background:#0a0a10;color:#475569;font-family:'Lora',Georgia,serif;
        display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;}
@@ -514,7 +514,7 @@ function offlinePage(failedUrl) {
 </head>
 <body>
 <p>
-  此内容尚未存档，建议连线后进行「锚定」。<br>
+  This content has not been archived. Connect to the internet and use Freeze to save it.<br>
   <span style="font-size:.8rem;font-family:'Inter',system-ui;margin-top:.75rem;display:block;">${escHtml(failedUrl.slice(0, 80))}</span>
 </p>
 </body></html>`;

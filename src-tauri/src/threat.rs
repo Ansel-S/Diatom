@@ -211,7 +211,7 @@ pub async fn evaluate_domain(
         return ThreatResult {
             domain: domain.to_owned(),
             level: ThreatLevel::Malicious,
-            reason: "该域名出现在本地威胁情报列表中（来源：abuse.ch / PhishTank）。".to_owned(),
+            reason: "This domain appears in the local threat intelligence list (source: abuse.ch / PhishTank).".to_owned(),
             check_source: "local_list".to_owned(),
         };
     }
@@ -223,7 +223,7 @@ pub async fn evaluate_domain(
                 return ThreatResult {
                     domain: domain.to_owned(),
                     level: ThreatLevel::Malicious,
-                    reason: "Quad9 的独立威胁情报将此域名标记为恶意。已由 DNS 层拦截。".to_owned(),
+                    reason: "Quad9's independent threat intelligence flagged this domain as malicious. Blocked at the DNS layer.".to_owned(),
                     check_source: "quad9".to_owned(),
                 };
             }
@@ -237,7 +237,7 @@ pub async fn evaluate_domain(
             return ThreatResult {
                 domain: domain.to_owned(),
                 level: ThreatLevel::Suspicious,
-                reason: "此域名注册时间不足 30 天。新域名是钓鱼攻击的常用基础设施，请谨慎。"
+                reason: "This domain was registered less than 30 days ago. Newly registered domains are common phishing infrastructure — proceed with caution."
                     .to_owned(),
                 check_source: "age_heuristic".to_owned(),
             };

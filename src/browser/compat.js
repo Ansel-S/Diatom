@@ -12,7 +12,7 @@
  *
  * Philosophy: Diatom never silently falls back to Blink.
  *   It always tells the user what happened and lets them decide.
- *   "向上靠不等于放弃用户。"
+ *   "Adapting upward is not the same as abandoning the user."
  */
 
 'use strict';
@@ -103,7 +103,7 @@ function injectCompatBanner(domain) {
   `;
 
   const msg = document.createElement('span');
-  msg.textContent = `⚠ Diatom 检测到此页面可能存在兼容性问题`;
+  msg.textContent = `⚠ Diatom detected a potential compatibility issue with this page`;
 
   const openBtn = document.createElement('button');
   openBtn.style.cssText = `
@@ -111,7 +111,7 @@ function injectCompatBanner(domain) {
     border:none; border-radius:3px; padding:3px 10px;
     cursor:pointer; font:500 11px 'Inter',system-ui;
   `;
-  openBtn.textContent = '在系统浏览器中打开';
+  openBtn.textContent = 'Open in system browser';
   openBtn.addEventListener('click', () => handoffToSystemBrowser());
 
   const dismissBtn = document.createElement('button');
@@ -119,7 +119,7 @@ function injectCompatBanner(domain) {
     background:none; border:none; color:#64748b; cursor:pointer;
     font-size:14px; padding:0 4px; line-height:1;
   `;
-  dismissBtn.setAttribute('aria-label', '关闭兼容提示');
+  dismissBtn.setAttribute('aria-label', 'Dismiss compatibility notice');
   dismissBtn.textContent = '✕';
   dismissBtn.addEventListener('click', () => {
     bar.remove();
@@ -146,11 +146,11 @@ function injectPaymentWarning(domain) {
     padding:7px 12px; display:flex; align-items:center; gap:8px;
   `;
   bar.innerHTML = `
-    <span>🔐 此网站可能需要 U 盾或支付插件。Diatom 不支持私有插件。</span>
+    <span>🔐 This site may require a hardware security key or payment plugin. Diatom does not support proprietary plugins.</span>
     <button onclick="window.__diatom_handoff();" style="
       margin-left:auto; background:#4c1d95; color:#ddd6fe; border:none;
       border-radius:3px; padding:3px 10px; cursor:pointer; font:500 11px 'Inter',system-ui;">
-      切换到系统浏览器
+      Switch to system browser
     </button>
     <button onclick="this.parentElement.remove();" style="
       background:none; border:none; color:#6b7280; cursor:pointer; font-size:14px;">✕</button>
@@ -172,7 +172,7 @@ export async function handoffToSystemBrowser(url) {
       font:500 .75rem 'Inter',system-ui; padding:.4rem .8rem;
       border-radius:.3rem; z-index:9999; pointer-events:none;
     `;
-    msg.textContent = '已在系统浏览器中打开（追踪参数已剥离）';
+    msg.textContent = 'Opened in system browser (tracking parameters stripped)';
     document.body.appendChild(msg);
     setTimeout(() => msg.remove(), 2500);
   } catch (err) {

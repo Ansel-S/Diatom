@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // diatom/src-tauri/src/storage_guard.rs  — v7.2  RED-6 / YELLOW
 //
-// Museum Storage Guard — SSD 膨胀防御
+// Museum Storage Guard — SSD Bloat Defence
 //
 // Problem: E-WBN bundles + Knowledge Packs can consume tens of GB.
 //          A user who imports Wikipedia ZIM (~87 GB) would fill their SSD.

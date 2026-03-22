@@ -67,81 +67,81 @@ fn block_narrative(n: i64) -> String {
         0 => "The trackers are eerily quiet this week. Maybe they've given up?".to_owned(),
         1..=99 => format!("Diatom intercepted {n} monitoring probes this week, neutralizing them before they could reach the renderer."),
         100..=999 => {
-            format!("本周共有 {n} 次追踪请求被截断于协议层。每一次都是你未曾经历过的数据收割。")
+            format!("This week, {n} tracking requests were severed at the protocol layer. Each one was data harvesting you never had to experience.")
         }
         1000..=9999 => {
-            format!("{n} 次。那是 {n} 次有人试图为你建立档案。Diatom 让每一次尝试都徒劳无功。")
+            format!("{n} times. That is {n} attempts to build a profile on you. Diatom made every single one of them futile.")
         }
-        _ => format!("{n} 次监控向量——全数抹除。数据经济本周在你的设备边界处遭遇了一堵墙。"),
+        _ => format!("{n} surveillance vectors — all neutralised. The data economy hit a wall at your device boundary this week."),
     }
 }
 
 fn noise_narrative(n: i64) -> String {
     match n {
-        0 => "本周指纹噪音注入暂停。如需启用，请检查隐私设置。".to_owned(),
-        1..=999 => format!("你的设备本周向外界广播了 {n} 个合成身份。真实的你，从未出现。"),
+        0 => "Fingerprint noise injection was paused this week. Check your privacy settings to re-enable it.".to_owned(),
+        1..=999 => format!("Your device broadcast {n} synthetic identities to the outside world this week. The real you never appeared."),
         1000..=99_999 => format!(
-            "{n} 次随机噪声注入。每次都意味着一份错误的 Canvas 指纹、一个虚假的 WebGL 签名。追踪者收获的，是一座幻影城市。"
+            "{n} random noise injections. Each one plants a corrupted Canvas fingerprint and a false WebGL signature. What trackers harvested was a phantom city."
         ),
-        _ => format!("{n} 次噪声注入——你的数字指纹从未在两次请求间保持一致。这是隐私的最后防线。"),
+        _ => format!("{n} noise injections — your digital fingerprint was never consistent between any two requests. This is the last line of privacy defence."),
     }
 }
 
 fn ram_narrative(mb: f64) -> String {
     if mb < 1.0 {
-        return "本周 Deep Sleep 策略尚未产生显著内存节省。".to_owned();
+        return "Deep Sleep has not produced significant memory savings this week.".to_owned();
     }
     if mb < 100.0 {
         return format!(
-            "Deep Sleep 为你的设备回收了约 {mb:.0} MB RAM。\
-            这些内存原本会因标签僵尸而永久燃烧。"
+            "Deep Sleep reclaimed approximately {mb:.0} MB of RAM for your device. \
+            This memory would have been permanently consumed by zombie tabs."
         );
     }
     if mb < 500.0 {
         return format!(
-            "约 {mb:.0} MB 内存在本周得以复活。\
-            {browser_name} 会让这些内存静静发热直至你关闭浏览器。Diatom 不会。",
-            browser_name = "某些浏览器"
+            "Approximately {mb:.0} MB of memory was reclaimed this week. \
+            {browser_name} would have let it silently burn until you closed the browser. Diatom does not.",
+            browser_name = "some browsers"
         );
     }
     format!(
-        "{mb:.0} MB RAM——本周从标签地狱中被解救。\
-        你的风扇没有因此多转一圈，你的电池也因此多撑了一会儿。"
+        "{mb:.0} MB of RAM — rescued from tab hell this week. \
+        Your fan did not spin an extra revolution for it, and your battery lasted a little longer."
     )
 }
 
 fn time_narrative(min: f64) -> String {
     if min < 1.0 {
-        return "本周过滤节省的时间微乎其微——或许你的浏览本就相当克制。".to_owned();
+        return "Time saved by filtering this week was negligible — perhaps your browsing habits were already quite disciplined.".to_owned();
     }
     if min < 10.0 {
-        return format!("拦截追踪器和内容农场为你省下了约 {min:.0} 分钟加载与噪音时间。");
+        return format!("Blocking trackers and content farms saved you approximately {min:.0} minutes of loading and noise.");
     }
     if min < 60.0 {
         return format!(
-            "本周约 {min:.0} 分钟未被低质量内容消耗。\
-            这些时间是你的。去做任何值得做的事。"
+            "Approximately {min:.0} minutes this week were not consumed by low-quality content. \
+            That time is yours. Do something worth doing."
         );
     }
     let hrs = min / 60.0;
     format!(
-        "{hrs:.1} 小时。那是你本周因 Diatom 过滤而未曾浪费的时间。\
-        不是因为算法给了你更好的内容——而是因为垃圾从未进入。"
+        "{hrs:.1} hours. That is the time you did not waste this week thanks to Diatom's filtering. \
+        Not because an algorithm served you better content — but because the junk never got in."
     )
 }
 
 fn summary_headline(blocks: i64, noise: i64) -> String {
     let total = blocks + noise;
     if total == 0 {
-        return "本周清净。".to_owned();
+        return "Clean week.".to_owned();
     }
     if total < 500 {
-        return format!("本周共发生 {total} 次对抗性事件。数字边界基本稳固。");
+        return format!("{total} adversarial events this week. Digital boundaries held firm.");
     }
     if total < 5000 {
-        return format!("{total} 次拦截 · 噪声注入。数据经济未能触达你。");
+        return format!("{total} blocks and noise injections. The data economy failed to reach you.");
     }
-    format!("{total} 次。他们没有停止尝试。你也没有。")
+    format!("{total} attempts. They have not stopped trying. Neither have you.")
 }
 
 #[cfg(test)]

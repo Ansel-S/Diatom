@@ -232,7 +232,7 @@ function showFreezeConfirmation(title) {
     padding:.5rem .9rem; border-radius:.35rem; z-index:9999;
     pointer-events:none; white-space:nowrap;
   `;
-  msg.textContent = `🧊 已冻结 · ${title.slice(0, 48)}`;
+  msg.textContent = `🧊 Frozen · ${title.slice(0, 48)}`;
   document.body.appendChild(msg);
   // Fade out after 2s
   setTimeout(() => {
@@ -343,7 +343,7 @@ function showThreatBanner(reason) {
   bar.textContent = `⚠ ${reason}`;
   const dismiss = document.createElement('button');
   dismiss.style.cssText = 'margin-left:.75rem;background:none;border:none;color:#fca5a5;cursor:pointer;';
-  dismiss.textContent = '继续访问';
+  dismiss.textContent = 'Continue anyway';
   dismiss.addEventListener('click', () => bar.remove());
   bar.appendChild(dismiss);
   document.body.prepend(bar);

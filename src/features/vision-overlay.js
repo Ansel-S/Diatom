@@ -134,7 +134,7 @@ async function runOCR(rect) {
       _tesseract = await loadTesseract();
     } catch (err) {
       console.error('[Vision] Tesseract load failed:', err);
-      showError('OCR 引擎加载失败。');
+      showError('OCR engine failed to load.');
       return;
     }
   }
@@ -145,12 +145,12 @@ async function runOCR(rect) {
     text = result?.data?.text?.trim() ?? '';
   } catch (err) {
     console.error('[Vision] OCR failed:', err);
-    showError('文字识别失败。');
+    showError('Text recognition failed.');
     return;
   }
 
   if (!text) {
-    showError('未识别到文字。');
+    showError('No text detected.');
     return;
   }
 
@@ -270,7 +270,7 @@ async function tryTranslate(text) {
   // Detect language: if majority ASCII, try translating to Chinese;
   // if majority CJK, translate to English.
   const cjkRatio = (text.match(/[\u4e00-\u9fa5]/g) ?? []).length / text.length;
-  const targetLang = cjkRatio > 0.3 ? 'English' : '中文';
+  const targetLang = cjkRatio > 0.3 ? 'English' : 'Chinese';
 
   try {
     // Use cmd_fetch to call local inference bridge
@@ -306,7 +306,7 @@ function showSpinner(rect) {
         border-top-color:#60a5fa;border-radius:50%;
         animation:vision-spin .6s linear infinite;
       "></span>
-      <span id="vision-progress">正在识别…</span>
+      <span id="vision-progress">Recognising…</span>
     </div>
   `;
   ensureVisionStyle();
@@ -315,7 +315,7 @@ function showSpinner(rect) {
 
 function updateSpinnerProgress(p) {
   const prog = qs('#vision-progress');
-  if (prog) prog.textContent = `识别中 ${Math.round(p * 100)}%`;
+  if (prog) prog.textContent = `Recognising ${Math.round(p * 100)}%`;
 }
 
 function showResult(rect, text) {
@@ -330,11 +330,11 @@ function showResult(rect, text) {
     border-radius:.25rem;color:#64748b;font-size:.7rem;
     padding:.15rem .4rem;cursor:pointer;
   `;
-  copyBtn.textContent = '复制';
+  copyBtn.textContent = 'Copy';
   copyBtn.addEventListener('click', () => {
     navigator.clipboard.writeText(text).catch(() => {});
     copyBtn.textContent = '✓';
-    setTimeout(() => { copyBtn.textContent = '复制'; }, 1200);
+    setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1200);
   });
 
   const closeBtn = el('button', 'vision-close');
@@ -370,7 +370,7 @@ function appendTranslation(translation) {
 
   const label = el('p');
   label.style.cssText = 'margin:0 0 .3rem;font-size:.68rem;color:#475569;letter-spacing:.06em;text-transform:uppercase;';
-  label.textContent = '译文';
+  label.textContent = 'Translation';
 
   const transEl = el('p');
   transEl.style.cssText = `

@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // diatom/src-tauri/src/decoy.rs  — v7.1
 //
-// Privacy noise injection: "隐私噪声注入" NOT "流量欺诈"
+// Privacy noise injection: "privacy noise injection" NOT "traffic fraud"
 //
 // Legal design:
 //   1. robots.txt strict compliance — never requests a disallowed path.

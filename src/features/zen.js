@@ -18,7 +18,7 @@ import { invoke } from '../browser/ipc.js';
 import { el, qs } from '../browser/utils.js';
 
 let _zenActive = false;
-let _aphorism  = '当下这一刻，将永远曾经存在。';
+let _aphorism  = 'Now will always have been.';
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
@@ -110,7 +110,7 @@ export function showInterstitial(domain, category) {
     // Blocked domain info
     const info = el('p');
     info.style.cssText = 'color:#475569;font-size:.85rem;margin:0 0 2rem;text-align:center;';
-    info.textContent = `${domain} · ${category === 'social' ? '社交媒体' : '娱乐内容'} · 已被 Zen 模式屏蔽`;
+    info.textContent = `${domain} · ${category === 'social' ? 'Social media' : 'Entertainment'} · blocked by Zen Mode`;
     overlay.appendChild(info);
 
     // Unlock gate — 50-char intent declaration
@@ -119,7 +119,7 @@ export function showInterstitial(domain, category) {
 
     const label = el('label');
     label.style.cssText = 'display:block;color:#64748b;font-size:.8rem;margin-bottom:.5rem;';
-    label.textContent   = '输入你的专注声明（至少 50 字）以暂时解除 Zen 模式：';
+    label.textContent   = 'Enter your focus declaration (at least 50 characters) to temporarily lift Zen Mode:';
     unlockWrap.appendChild(label);
 
     const textarea = el('textarea');
@@ -130,7 +130,7 @@ export function showInterstitial(domain, category) {
       padding:.5rem .75rem; resize:none; box-sizing:border-box;
       outline:none;
     `;
-    textarea.placeholder = '我需要暂时打开这个网站，因为……';
+    textarea.placeholder = 'I need to briefly visit this site because…';
     unlockWrap.appendChild(textarea);
 
     const counter = el('p');
@@ -150,7 +150,7 @@ export function showInterstitial(domain, category) {
 
     const unlockBtn = el('button');
     unlockBtn.disabled    = true;
-    unlockBtn.textContent = '暂时离开专注状态';
+    unlockBtn.textContent = 'Leave focus temporarily';
     unlockBtn.style.cssText = `
       flex:1; padding:.65rem; border:none; border-radius:.4rem;
       background:#1e40af; color:#fff; font-size:.85rem; cursor:pointer;
@@ -169,7 +169,7 @@ export function showInterstitial(domain, category) {
     });
 
     const stayBtn = el('button');
-    stayBtn.textContent = '返回专注';
+    stayBtn.textContent = 'Stay focused';
     stayBtn.style.cssText = `
       flex:1; padding:.65rem; border:1px solid rgba(255,255,255,.1);
       border-radius:.4rem; background:none; color:#94a3b8;
@@ -197,7 +197,7 @@ function applyZenUi(active) {
   const omni = qs('#omnibox');
   if (!omni) return;
   omni.style.borderLeft = active ? '2px solid #0d9488' : '';
-  omni.title = active ? 'Zen 模式已激活 · Ctrl+Shift+Z 切换' : '';
+  omni.title = active ? 'Zen Mode active · Ctrl+Shift+Z to toggle' : '';
 }
 
 function broadcastToSW() {

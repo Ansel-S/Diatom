@@ -249,7 +249,7 @@ pub fn compute(mut inp: EchoInput, prev: &PrevSpectrum, week_iso: &str) -> EchoO
                 intentional_ratio: 0.0,
                 shallow_ratio: 0.0,
                 noise_ratio: 0.0,
-                suggestion: "本周数据不足。".to_owned(),
+                suggestion: "Insufficient data this week.".to_owned(),
             },
             focus_score: 0.0,
             breadth_score: 0.0,
@@ -309,19 +309,19 @@ pub fn compute(mut inp: EchoInput, prev: &PrevSpectrum, week_iso: &str) -> EchoO
 
 fn make_suggestion(deep: f32, shallow: f32, scholar: f32, leisure: f32) -> String {
     if deep < 0.1 && shallow > 0.6 {
-        return "本周深度阅读占比极低，建议下周预留至少一个清晨时段给长文或 RSS 订阅。".to_owned();
+        return "Deep reading was very low this week. Consider reserving at least one morning session next week for long-form articles or RSS feeds.".to_owned();
     }
     if leisure > 0.6 {
-        return "本周休闲内容占主导。这无可厚非，但也许值得追问：你真正想记住的，是其中哪些？"
+        return "Leisure content dominated this week. That's fine, but it may be worth asking: which of it do you actually want to remember?"
             .to_owned();
     }
     if scholar > 0.5 && deep > 0.3 {
-        return "本周学术向内容表现强劲，专注度较高。保持节奏。".to_owned();
+        return "Scholar-oriented content performed strongly this week, with relatively high focus. Keep the rhythm.".to_owned();
     }
     if deep > 0.4 {
-        return "深度阅读健康。信息质量良好。".to_owned();
+        return "Deep reading is in good shape. Information quality is healthy.".to_owned();
     }
-    "本周阅读结构均衡。".to_owned()
+    "Reading structure is balanced this week.".to_owned()
 }
 
 /// Format a unix timestamp as ISO week string: "2025-W42"

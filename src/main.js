@@ -171,7 +171,7 @@ function updateIndexProgressBadge(remaining) {
     if (remaining === 0) {
       badge.remove();
     } else {
-      badge.textContent = `🗂 索引中… 剩余 ${remaining} 项`;
+      badge.textContent = `🗂 Indexing… ${remaining} remaining`;
     }
   }
 }
