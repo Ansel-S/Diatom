@@ -1,0 +1,178 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// diatom/src-tauri/src/a11y.rs  — v7.2  RED-2
+//
+// Accessibility Layer — 道德底线，不可妥协
+//
+// Problem: Servo's accessibility tree support lags Chromium.
+//          For screen reader users (NVDA/JAWS/VoiceOver), Diatom is
+//          currently a black box.
+//
+// Solution: A two-part approach that works within Tauri's constraints:
+//
+//   Part A — Platform AT bridge (Tauri + WebView):
+//     The host WebView (WKWebView on macOS, WebView2 on Windows) DOES
+//     expose an accessibility tree to the OS. Diatom's chrome UI (tabs,
+//     omnibox, panels) needs proper ARIA roles and labels so the WebView
+//     container correctly surfaces these to NVDA/VoiceOver/JAWS.
+//
+//     Implementation: inject aria-label, role, and aria-live attributes
+//     into the Diatom chrome DOM via an a11y pass on startup.
+//
+//   Part B — Page-content passthrough:
+//     Page content is rendered by the host WebView's engine which has
+//     its own accessibility tree. Diatom must NOT interfere with this.
+//     The only risk is our injected diatom-api.js disturbing aria trees.
+//     We audit diatom-api.js to ensure no aria attributes are modified.
+//
+//   Part C — Keyboard-only navigation:
+//     All Diatom chrome panels must be fully keyboard navigable.
+//     Tab order: omnibox → tab strip → active page → panels.
+//     No mouse-only interactions in Diatom's own UI.
+//
+// What this does NOT fix:
+//   - Servo rendering engine accessibility (requires upstream Servo work)
+//   - Complex page accessibility that depends on Blink's AT integration
+//
+// Size cost: ~0 bytes compiled (this module only generates injected JS
+//            strings and ARIA attribute maps — no heavy dependencies).
+// ─────────────────────────────────────────────────────────────────────────────
+
+use serde::{Deserialize, Serialize};
+
+// ── ARIA label map for Diatom chrome elements ────────────────────────────────
+
+/// Injected into the chrome WebView on startup.
+/// Each entry maps a CSS selector to an ARIA attribute set.
+#[derive(Debug, Serialize)]
+pub struct AriaRule {
+    pub selector: &'static str,
+    pub role:     Option<&'static str>,
+    pub label:    Option<&'static str>,
+    pub live:     Option<&'static str>,  // "polite" | "assertive" | "off"
+    pub expanded: Option<bool>,
+}
+
+pub const CHROME_ARIA_RULES: &[AriaRule] = &[
+    AriaRule { selector: "#omnibox",        role: Some("combobox"),    label: Some("地址栏与搜索"),        live: None,         expanded: Some(false) },
+    AriaRule { selector: "#tab-bar",        role: Some("tablist"),     label: Some("标签页列表"),          live: None,         expanded: None },
+    AriaRule { selector: ".tab-btn",        role: Some("tab"),         label: None,                        live: None,         expanded: None },
+    AriaRule { selector: ".tab-btn.active", role: Some("tab"),         label: None,                        live: None,         expanded: None },
+    AriaRule { selector: "#notes-zone",     role: Some("region"),      label: Some("草稿与回声提示区"),    live: Some("polite"),expanded: None },
+    AriaRule { selector: "#ai-panel",       role: Some("dialog"),      label: Some("AI 对话面板"),         live: Some("polite"),expanded: None },
+    AriaRule { selector: ".echo-panel",     role: Some("dialog"),      label: Some("Diatom 回声面板"),     live: None,         expanded: None },
+    AriaRule { selector: "#vc-badge",       role: Some("status"),      label: Some("视频播放速度"),        live: Some("polite"),expanded: None },
+    AriaRule { selector: "#index-progress", role: Some("progressbar"), label: Some("档案馆索引进度"),      live: Some("polite"),expanded: None },
+    AriaRule { selector: ".devnet-panel",   role: Some("log"),         label: Some("网络请求日志"),        live: Some("off"),  expanded: None },
+];
+
+/// Generate the JS snippet that applies ARIA rules to the chrome DOM.
+/// Called once on startup, injected via win.eval().
+pub fn generate_aria_injection_script() -> String {
+    let mut parts = Vec::new();
+    parts.push("(function applyA11y() {".to_owned());
+    parts.push("  'use strict';".to_owned());
+    parts.push("  function apply(sel, role, label, live, expanded) {".to_owned());
+    parts.push("    document.querySelectorAll(sel).forEach(el => {".to_owned());
+    parts.push("      if (role)     el.setAttribute('role', role);".to_owned());
+    parts.push("      if (label)    el.setAttribute('aria-label', label);".to_owned());
+    parts.push("      if (live)     el.setAttribute('aria-live', live);".to_owned());
+    parts.push("      if (expanded !== null && expanded !== undefined)".to_owned());
+    parts.push("        el.setAttribute('aria-expanded', String(expanded));".to_owned());
+    parts.push("    });".to_owned());
+    parts.push("  }".to_owned());
+
+    for rule in CHROME_ARIA_RULES {
+        let role     = rule.role.map(|r| format!("'{r}'")).unwrap_or("null".into());
+        let label    = rule.label.map(|l| format!("'{l}'")).unwrap_or("null".into());
+        let live     = rule.live.map(|v| format!("'{v}'")).unwrap_or("null".into());
+        let expanded = match rule.expanded {
+            Some(true)  => "true".to_owned(),
+            Some(false) => "false".to_owned(),
+            None        => "null".to_owned(),
+        };
+        parts.push(format!("  apply('{}', {}, {}, {}, {});",
+            rule.selector, role, label, live, expanded));
+    }
+
+    // Tab navigation: ensure every interactive element has tabindex
+    parts.push("  document.querySelectorAll('.tab-btn,.tab-close,[data-action]').forEach((el,i) => {".to_owned());
+    parts.push("    if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');".to_owned());
+    parts.push("  });".to_owned());
+
+    // Announce tab switches to screen readers via aria-live region
+    parts.push("  let liveRegion = document.getElementById('__a11y_live');".to_owned());
+    parts.push("  if (!liveRegion) {".to_owned());
+    parts.push("    liveRegion = document.createElement('div');".to_owned());
+    parts.push("    liveRegion.id = '__a11y_live';".to_owned());
+    parts.push("    liveRegion.setAttribute('aria-live', 'assertive');".to_owned());
+    parts.push("    liveRegion.setAttribute('aria-atomic', 'true');".to_owned());
+    parts.push("    liveRegion.style.cssText = 'position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;';".to_owned());
+    parts.push("    document.body.appendChild(liveRegion);".to_owned());
+    parts.push("  }".to_owned());
+    parts.push("  window.__diatomA11yAnnounce = (msg) => { liveRegion.textContent = ''; setTimeout(() => liveRegion.textContent = msg, 50); };".to_owned());
+
+    parts.push("})();".to_owned());
+    parts.join("\n")
+}
+
+// ── Keyboard navigation enforcement ──────────────────────────────────────────
+
+/// Returns JS that enforces full keyboard navigation for Diatom chrome.
+/// Handles Tab-through-panels and Escape-to-close for all overlay panels.
+pub fn keyboard_nav_script() -> &'static str {
+    r#"(function() {
+  'use strict';
+  // Close any open overlay panel on Escape
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    const panel = document.querySelector(
+      '.echo-panel, .devnet-panel, .crusher-panel, #ai-panel, #zen-interstitial'
+    );
+    if (panel) {
+      const closeBtn = panel.querySelector('button[class*="close"], #crusher-close, #echo-close');
+      if (closeBtn) closeBtn.click();
+    }
+  }, { capture: true });
+
+  // Tab strip keyboard navigation: Left/Right arrow keys cycle tabs
+  const tabBar = document.getElementById('tab-bar');
+  if (tabBar) {
+    tabBar.addEventListener('keydown', e => {
+      const tabs = [...tabBar.querySelectorAll('.tab-btn')];
+      const idx  = tabs.findIndex(t => t === document.activeElement);
+      if (idx === -1) return;
+      if (e.key === 'ArrowRight') { e.preventDefault(); tabs[(idx + 1) % tabs.length]?.focus(); }
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); tabs[(idx - 1 + tabs.length) % tabs.length]?.focus(); }
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tabs[idx]?.click(); }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        tabs[idx]?.querySelector('.tab-close')?.click();
+      }
+    });
+  }
+})();"#
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aria_script_is_valid_js_ish() {
+        let script = generate_aria_injection_script();
+        assert!(script.contains("applyA11y"));
+        assert!(script.contains("aria-label"));
+        assert!(script.contains("__diatomA11yAnnounce"));
+        // Should have one apply() call per rule
+        let count = script.matches("apply(").count();
+        assert_eq!(count, CHROME_ARIA_RULES.len() + 1); // +1 for the function def
+    }
+
+    #[test]
+    fn all_rules_have_selector() {
+        for rule in CHROME_ARIA_RULES {
+            assert!(!rule.selector.is_empty());
+            assert!(rule.role.is_some() || rule.label.is_some() || rule.live.is_some());
+        }
+    }
+}
