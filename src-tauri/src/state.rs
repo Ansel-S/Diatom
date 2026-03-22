@@ -59,7 +59,7 @@ impl AppState {
         let threat_list: HashSet<String> = db.get_setting("threat_list_json")
             .and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
         let ws_id = db.get_setting("active_workspace_id").unwrap_or_else(|| "default".to_owned());
-        let noise_seed: u64 = { use rand::Rng; rand::thread_rng().gen() };
+        let noise_seed: u64 = rand::random();
 
         let mut compat_store = crate::compat::CompatStore::default();
         if let Some(json) = db.get_setting("compat_legacy_domains") {
@@ -103,7 +103,7 @@ impl AppState {
         *self.ws_id.lock().unwrap() = ws_id.to_owned();
         self.db.set_setting("active_workspace_id", ws_id)?;
         use rand::Rng;
-        *self.noise_seed.lock().unwrap() = rand::thread_rng().gen();
+        *self.noise_seed.lock().unwrap() = rand::random();
         Ok(())
     }
 
