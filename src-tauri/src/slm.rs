@@ -41,7 +41,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 // ── Curated model catalogue ───────────────────────────────────────────────────
 
@@ -398,6 +397,18 @@ impl SlmServer {
 // ── HTTP server loop ─────────────────────────────────────────────────────────
 // Minimal HTTP/1.1 server — avoids adding a web framework dependency.
 // Only the paths used by VS Code / Continue.dev are implemented.
+//
+// Fix (shutdown): The previous implementation checked `shutdown` only at the
+// top of the loop, BEFORE the blocking `accept()` call.  If the flag was set
+// while no client was connecting the task would hang forever.  We now use
+// `tokio::select!` so that either a new connection or a cancellation wakes the
+// task.
+//
+// Fix (large bodies): The previous implementation did a single `read()` into a
+// 32 KB buffer.  A long conversation history easily exceeds that, causing the
+// JSON parse to fail with a truncated-body error.  We now read the full HTTP
+// request by first consuming headers until `\r\n\r\n`, then reading exactly
+// `Content-Length` more bytes.
 
 pub async fn run_server(server: Arc<SlmServer>, shutdown: Arc<AtomicBool>) {
     let addr = format!("127.0.0.1:{}", SLM_PORT);
@@ -407,35 +418,100 @@ pub async fn run_server(server: Arc<SlmServer>, shutdown: Arc<AtomicBool>) {
     };
 
     loop {
+        // Use select! so a shutdown signal interrupts the accept() await.
+        let accept_result = tokio::select! {
+            res = listener.accept() => res,
+            _ = async {
+                loop {
+                    if shutdown.load(Ordering::Relaxed) { return; }
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            } => break,
+        };
+
         if shutdown.load(Ordering::Relaxed) { break; }
 
-        let (mut stream, _) = match listener.accept().await {
+        let (stream, _) = match accept_result {
             Ok(s) => s,
             Err(_) => continue,
         };
 
         let srv = Arc::clone(&server);
         tokio::spawn(async move {
-            let mut buf = vec![0u8; 32 * 1024];
-            let n = match stream.read(&mut buf).await { Ok(n) => n, Err(_) => return };
-            let request = String::from_utf8_lossy(&buf[..n]);
-
-            let (status, body) = handle_request(&srv, &request).await;
-
-            let response = format!(
-                "HTTP/1.1 {}\r\n\
-                 Content-Type: application/json\r\n\
-                 Content-Length: {}\r\n\
-                 Access-Control-Allow-Origin: *\r\n\
-                 Access-Control-Allow-Headers: Content-Type, Authorization\r\n\
-                 Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
-                 Connection: close\r\n\
-                 \r\n{}",
-                status, body.len(), body
-            );
-            let _ = stream.write_all(response.as_bytes()).await;
+            handle_connection(srv, stream).await;
         });
     }
+}
+
+/// Read a full HTTP/1.1 request from `stream`, then dispatch to `handle_request`.
+async fn handle_connection(server: Arc<SlmServer>, mut stream: tokio::net::TcpStream) {
+    use tokio::io::AsyncReadExt;
+
+    // Read headers first (up to 8 KB)
+    let mut header_buf = Vec::with_capacity(4096);
+    let mut tmp = [0u8; 1024];
+    let header_end;
+    loop {
+        match stream.read(&mut tmp).await {
+            Ok(0) | Err(_) => return,
+            Ok(n) => header_buf.extend_from_slice(&tmp[..n]),
+        }
+        if let Some(pos) = find_header_end(&header_buf) {
+            header_end = pos;
+            break;
+        }
+        if header_buf.len() > 8192 { return; } // malformed / too large headers
+    }
+
+    // Parse Content-Length from headers
+    let header_str = String::from_utf8_lossy(&header_buf[..header_end]);
+    let content_length: usize = header_str.lines()
+        .find(|l| l.to_lowercase().starts_with("content-length:"))
+        .and_then(|l| l.split(':').nth(1))
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or(0);
+
+    // Read body (after the \r\n\r\n separator)
+    let body_start = header_end + 4; // skip \r\n\r\n
+    let already_read_body = if header_buf.len() > body_start {
+        header_buf[body_start..].to_vec()
+    } else {
+        Vec::new()
+    };
+
+    let mut body = already_read_body;
+    while body.len() < content_length {
+        let needed = content_length - body.len();
+        let mut chunk = vec![0u8; needed.min(16 * 1024)];
+        match stream.read(&mut chunk).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => body.extend_from_slice(&chunk[..n]),
+        }
+    }
+
+    // Reconstruct the full request string for `handle_request`
+    let full_request = format!("{}\r\n\r\n{}", header_str.trim_end(), String::from_utf8_lossy(&body));
+
+    let (status, resp_body) = handle_request(&server, &full_request).await;
+
+    let response = format!(
+        "HTTP/1.1 {}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Access-Control-Allow-Origin: *\r\n\
+         Access-Control-Allow-Headers: Content-Type, Authorization\r\n\
+         Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
+         Connection: close\r\n\
+         \r\n{}",
+        status, resp_body.len(), resp_body
+    );
+    use tokio::io::AsyncWriteExt;
+    let _ = stream.write_all(response.as_bytes()).await;
+}
+
+/// Find the position of `\r\n\r\n` in `buf`, returning the index of the `\r`.
+fn find_header_end(buf: &[u8]) -> Option<usize> {
+    buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
 
 async fn handle_request(server: &SlmServer, raw: &str) -> (&'static str, String) {

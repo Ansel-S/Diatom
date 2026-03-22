@@ -185,9 +185,15 @@ async function onTabChange(tabId) {
     const tab   = state.tabs?.find(t => t.id === tabId);
     if (tab?.url) {
       updateHotkeyContext(tab.url);
-      // Build favicon URL from domain
-      const favicon = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(tab.url)}&sz=32`;
-      updateLustre(favicon);
+      // Use DuckDuckGo's favicon service — it accepts only the hostname (not the
+      // full URL), so it never receives the user's browsing path.
+      // Google's s2/favicons API (?domain=<full URL>) would leak every navigation.
+      let faviconUrl = '';
+      try {
+        const host = new URL(tab.url).hostname;
+        faviconUrl = `https://icons.duckduckgo.com/ip3/${host}.ico`;
+      } catch { /* non-navigable URL — no favicon */ }
+      if (faviconUrl) updateLustre(faviconUrl);
       injectVideoController();
     }
   } catch { /* non-critical */ }

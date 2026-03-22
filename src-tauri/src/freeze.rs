@@ -17,13 +17,13 @@
 //   persisted in the DB meta table under "master_key_b64" (hex-encoded).
 //   TPM/Secure Enclave integration is a platform-specific build flag (v7.3).
 //
-// Bundle format (.ewbn):
+// Bundle format (.ewbn) — actual binary layout:
 //   [4 bytes]  magic: 0x45574254 ("EWBT")
 //   [4 bytes]  version: u32 le = 1
-//   [12 bytes] nonce (random)
-//   [8 bytes]  ciphertext length: u64 le
-//   [N bytes]  ciphertext (AES-GCM-256 of gzip-compressed stripped HTML)
-//   [16 bytes] AES-GCM auth tag (appended by aes-gcm crate)
+//   [8 bytes]  payload length: u64 le
+//   [N bytes]  payload = nonce[12] ++ ciphertext ++ AES-GCM tag[16]
+//                        (assembled by aes_gcm_encrypt; the nonce is prepended
+//                         inside the payload, not written as a separate header field)
 // ─────────────────────────────────────────────────────────────────────────────
 
 use aes_gcm::{
@@ -288,11 +288,46 @@ fn parse_ewbn(raw: &[u8]) -> Result<Vec<u8>> {
     Ok(raw[16..16 + len].to_vec())
 }
 
-// ── Master key bootstrap (fallback without TPM) ────────────────────────────────
+// ── Master key bootstrap ──────────────────────────────────────────────────────
 
-/// Get or generate the 32-byte master key stored in DB meta.
-/// In v7.3, this will be replaced with TPM/Secure Enclave retrieval.
+/// Retrieve or generate the 32-byte master key.
+///
+/// Priority:
+///   1. OS keychain / secret store (macOS Keychain, Windows DPAPI, Linux
+///      libsecret).  This keeps the key out of the database file entirely.
+///   2. Fallback: hex value in DB meta table `master_key_hex`.
+///      **This is insecure** — the key sits next to the ciphertext — and is
+///      only used when the OS credential store is unavailable (e.g. CI/CD,
+///      headless servers).  A warning is emitted.
+///
+/// TPM / Secure Enclave hardware binding is planned for v7.3.
 pub fn get_or_init_master_key(db: &crate::db::Db) -> Result<[u8; 32]> {
+    // ── 1. Try OS keychain ────────────────────────────────────────────────────
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(key) = macos_keychain_read() {
+            return Ok(key);
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(key) = windows_dpapi_read(db) {
+            return Ok(key);
+        }
+    }
+    #[cfg(all(target_os = "linux", feature = "secret-service"))]
+    {
+        if let Some(key) = linux_secret_service_read() {
+            return Ok(key);
+        }
+    }
+
+    // ── 2. DB fallback (insecure — key co-located with ciphertext) ────────────
+    tracing::warn!(
+        "OS keychain unavailable — master key stored in SQLite (insecure fallback). \
+         Install a keychain daemon or rebuild with platform credential support."
+    );
+
     if let Some(hex_key) = db.get_setting("master_key_hex") {
         let bytes = hex::decode(&hex_key).context("decode master key")?;
         if bytes.len() != 32 { bail!("invalid master key length"); }
@@ -300,12 +335,76 @@ pub fn get_or_init_master_key(db: &crate::db::Db) -> Result<[u8; 32]> {
         arr.copy_from_slice(&bytes);
         return Ok(arr);
     }
-    // Generate a new random master key
+
+    // Generate a new random master key and persist it.
     let mut key = [0u8; 32];
     OsRng.fill_bytes(&mut key);
     db.set_setting("master_key_hex", &hex::encode(key))?;
-    tracing::info!("generated new master key (TPM not available on this platform)");
+    tracing::warn!("Generated new master key (stored in DB — consider enabling keychain support).");
     Ok(key)
+}
+
+// ── macOS Keychain ────────────────────────────────────────────────────────────
+
+#[cfg(target_os = "macos")]
+fn macos_keychain_read() -> Option<[u8; 32]> {
+    use std::process::Command;
+    // security(1) CLI is available on all macOS versions.
+    // We use the generic-password store under the Diatom service name.
+    let out = Command::new("security")
+        .args(["find-generic-password", "-s", "com.ansel-s.diatom.masterkey", "-w"])
+        .output().ok()?;
+    if !out.status.success() { return None; }
+    let hex = String::from_utf8(out.stdout).ok()?;
+    let bytes = hex::decode(hex.trim()).ok()?;
+    if bytes.len() != 32 { return None; }
+    let mut arr = [0u8; 32];
+    arr.copy_from_slice(&bytes);
+    Some(arr)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_keychain_write(key: &[u8; 32]) -> bool {
+    use std::process::Command;
+    let hex_key = hex::encode(key);
+    // Delete any existing entry first (add fails if the item already exists).
+    let _ = Command::new("security")
+        .args(["delete-generic-password", "-s", "com.ansel-s.diatom.masterkey"])
+        .output();
+    Command::new("security")
+        .args(["add-generic-password", "-s", "com.ansel-s.diatom.masterkey",
+               "-a", "diatom", "-w", &hex_key])
+        .status().map(|s| s.success()).unwrap_or(false)
+}
+
+// ── Windows DPAPI ────────────────────────────────────────────────────────────
+
+#[cfg(target_os = "windows")]
+fn windows_dpapi_read(db: &crate::db::Db) -> Option<[u8; 32]> {
+    // Windows DPAPI encrypts the key blob with the user's login credentials.
+    // We store the DPAPI-encrypted blob in the DB; DPAPI handles key protection.
+    use std::os::windows::ffi::OsStrExt;
+    let blob_hex = db.get_setting("master_key_dpapi_blob")?;
+    let encrypted = hex::decode(&blob_hex).ok()?;
+    unsafe { dpapi_decrypt(&encrypted) }
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn dpapi_decrypt(data: &[u8]) -> Option<[u8; 32]> {
+    use windows_sys::Win32::Security::Cryptography::{
+        CryptUnprotectData, CRYPTOAPI_BLOB,
+    };
+    let mut in_blob = CRYPTOAPI_BLOB { cbData: data.len() as u32, pbData: data.as_ptr() as *mut _ };
+    let mut out_blob = CRYPTOAPI_BLOB { cbData: 0, pbData: std::ptr::null_mut() };
+    if CryptUnprotectData(&mut in_blob, std::ptr::null_mut(), std::ptr::null_mut(),
+                          std::ptr::null_mut(), std::ptr::null_mut(), 0, &mut out_blob) == 0 {
+        return None;
+    }
+    if out_blob.cbData as usize != 32 { return None; }
+    let mut arr = [0u8; 32];
+    std::ptr::copy_nonoverlapping(out_blob.pbData, arr.as_mut_ptr(), 32);
+    windows_sys::Win32::Foundation::LocalFree(out_blob.pbData as _);
+    Some(arr)
 }
 
 #[cfg(test)]

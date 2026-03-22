@@ -557,10 +557,41 @@ pub fn unix_now() -> i64 {
 }
 
 /// ISO week start (Monday 00:00 UTC) for the given unix timestamp.
+///
+/// Day-of-week derivation:
+///   Unix epoch (1970-01-01) was a Thursday.
+///   If Mon=0, Thu=3, so days-since-epoch for a Monday satisfies
+///   (days + 3) % 7 == 0  →  offset is +3, not +4.
 pub fn week_start(ts: i64) -> i64 {
-    let day_secs  = ts % (7 * 86_400);
-    let week_secs = ts - day_secs;
-    // Align to Monday: epoch 1970-01-01 is Thursday = day 3
-    let dow = ((ts / 86_400) + 4) % 7; // 0=Mon..6=Sun
-    ts - (dow as i64 * 86_400) - (ts % 86_400)
+    let dow = ((ts / 86_400) + 3) % 7; // 0=Mon … 6=Sun
+    ts - (dow * 86_400) - (ts % 86_400)
+}
+
+#[cfg(test)]
+mod week_start_tests {
+    use super::week_start;
+
+    /// Verify that week_start always returns a Monday at 00:00 UTC.
+    #[test]
+    fn week_start_is_always_monday_midnight() {
+        // 2026-03-16 00:00:00 UTC is a Monday (epoch day 20528)
+        let monday_ts: i64 = 20528 * 86_400;
+        // Test every day of that week
+        for offset_days in 0i64..7 {
+            let ts = monday_ts + offset_days * 86_400 + 43_200; // noon
+            let ws = week_start(ts);
+            assert_eq!(
+                ws, monday_ts,
+                "week_start for day +{offset_days} should be Monday {monday_ts}, got {ws}"
+            );
+            assert_eq!(ws % 86_400, 0, "week_start must be at midnight (00:00 UTC)");
+        }
+    }
+
+    #[test]
+    fn consecutive_weeks_are_7_days_apart() {
+        let ts1: i64 = 20528 * 86_400 + 3 * 86_400; // Wednesday
+        let ts2: i64 = ts1 + 7 * 86_400;             // next Wednesday
+        assert_eq!(week_start(ts2) - week_start(ts1), 7 * 86_400);
+    }
 }

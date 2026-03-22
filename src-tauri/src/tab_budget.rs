@@ -171,12 +171,22 @@ pub fn available_memory_bytes() -> u64 {
     #[cfg(target_os = "macos")]
     {
         use std::process::Command;
-        // vm_stat gives page-level memory statistics
+        // vm_stat gives page-level memory statistics.
+        // Page size differs by architecture: Apple Silicon = 16 384 B, Intel = 4 096 B.
+        // Read it at runtime via `pagesize` sysctl rather than hardcoding.
+        let page_size: u64 = {
+            std::process::Command::new("sysctl")
+                .args(["-n", "hw.pagesize"])
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .and_then(|s| s.trim().parse().ok())
+                .unwrap_or(4_096) // safe fallback for Intel
+        };
         if let Ok(out) = Command::new("vm_stat").output() {
             if let Ok(text) = String::from_utf8(out.stdout) {
                 let pages_free: u64 = parse_vm_stat_field(&text, "Pages free");
                 let pages_inactive: u64 = parse_vm_stat_field(&text, "Pages inactive");
-                let page_size: u64 = 16_384; // Apple Silicon; 4096 on Intel
                 let total = (pages_free + pages_inactive) * page_size;
                 if total > 0 { return total; }
             }

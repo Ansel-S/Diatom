@@ -152,6 +152,14 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     let state = AppState::new(data_dir)?;
 
+    // ── IMPORTANT: manage state FIRST so every IPC handler that fires from
+    // the injected scripts or the "diatom:ready" event can access AppState
+    // without a State<AppState> "not managed" panic. ────────────────────────
+    app.manage(state);
+
+    // Retrieve the now-managed state reference for the background tasks below.
+    let st = app.state::<AppState>();
+
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.eval(include_str!("../resources/diatom-api.js"));
         let _ = win.eval(&crate::a11y::generate_aria_injection_script());
@@ -160,12 +168,12 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // SLM server background task (when lab enabled)
-    if labs::is_lab_enabled(&state.db, "slm_server") {
-        let privacy_mode = labs::is_lab_enabled(&state.db, "slm_extreme_privacy");
-        let preferred    = state.db.get_setting("slm_active_model");
+    if labs::is_lab_enabled(&st.db, "slm_server") {
+        let privacy_mode = labs::is_lab_enabled(&st.db, "slm_extreme_privacy");
+        let preferred    = st.db.get_setting("slm_active_model");
         let shutdown     = Arc::new(AtomicBool::new(false));
         let shutdown_c   = Arc::clone(&shutdown);
-        *state.slm_shutdown.lock().unwrap() = Some(shutdown);
+        *st.slm_shutdown.lock().unwrap() = Some(shutdown);
         tauri::async_runtime::spawn(async move {
             let server = Arc::new(slm::SlmServer::new(privacy_mode, preferred.as_deref()).await);
             tracing::info!("SLM server online — backend: {:?}", server.backend);
@@ -174,7 +182,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Tab budget recalculation loop (60s interval)
-    if labs::is_lab_enabled(&state.db, "dynamic_tab_budget") {
+    if labs::is_lab_enabled(&st.db, "dynamic_tab_budget") {
         let ah = app.handle().clone();
         tauri::async_runtime::spawn(async move {
             loop {
@@ -210,6 +218,5 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    app.manage(state);
     Ok(())
 }

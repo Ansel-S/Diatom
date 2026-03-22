@@ -87,9 +87,31 @@ pub fn is_blocked(url: &str) -> bool {
     BLOCKER.is_match(url)
 }
 
-/// Returns a stub response type for blocked URLs (for cosmetic vs network blocks).
-pub fn stub_for(_url: &str) -> Option<&'static str> {
-    Some("blocked")
+/// Returns a JS stub string for the blocked URL (cosmetic replacement),
+/// or None if no domain-specific stub is defined.
+pub fn stub_for(url: &str) -> Option<&'static str> {
+    let host = Url::parse(url).ok()
+        .and_then(|u| u.host_str().map(|h| h.to_owned()))
+        .unwrap_or_default();
+
+    // Domain-specific stubs prevent "X is not defined" JS errors on host pages.
+    const STUBS: &[(&str, &str)] = &[
+        ("google-analytics.com",  "window.ga=function(){};window.gtag=function(){};"),
+        ("googletagmanager.com",  "window.dataLayer=window.dataLayer||[];"),
+        ("hotjar.com",            "(function(h){h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)}})(window);"),
+        ("connect.facebook.net",  "!function(f){f.fbq=function(){};f.fbq.loaded=!0;}(window);"),
+        ("amplitude.com",         "window.amplitude={getInstance:function(){return{logEvent:function(){}}}};"),
+        ("api.segment.io",        "window.analytics={track:function(){},page:function(){},identify:function(){}};"),
+        ("cdn.segment.com",       "window.analytics={track:function(){},page:function(){},identify:function(){}};"),
+        ("mixpanel.com",          "window.mixpanel={track:function(){},identify:function(){},init:function(){}};"),
+    ];
+
+    for (pattern, stub) in STUBS {
+        if host.contains(pattern) {
+            return Some(stub);
+        }
+    }
+    None
 }
 
 /// Upgrade HTTP → HTTPS for known-safe origins.
