@@ -19,14 +19,13 @@
 //   • No embedded <script> or javascript: (XSS guard).
 // ─────────────────────────────────────────────────────────────────────────────
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 const MAX_SELECTOR_LEN: usize = 512;
 
 /// Dangerous selectors that would crush the entire page
 const DISALLOWED_ROOTS: &[&str] = &[
-    ":root", ":host", "html ", "html>", "html,",
-    "body ", "body>", "body,", "* {", "*{",
+    ":root", ":host", "html ", "html>", "html,", "body ", "body>", "body,", "* {", "*{",
 ];
 
 /// Validate a CSS selector before storing it.
@@ -61,10 +60,7 @@ pub fn validate_selector(selector: &str) -> Result<()> {
 /// so the JS side can ask for validation and cleaning server-side.
 pub fn clean_selector(selector: &str) -> String {
     // Normalise whitespace
-    let s = selector
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let s = selector.split_whitespace().collect::<Vec<_>>().join(" ");
     // Trim leading/trailing punctuation noise
     s.trim_matches(|c: char| c == ',' || c == ';').to_owned()
 }

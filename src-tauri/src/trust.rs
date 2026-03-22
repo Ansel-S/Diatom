@@ -25,18 +25,18 @@ pub enum TrustLevel {
 impl TrustLevel {
     pub fn from_str(s: &str) -> Self {
         match s {
-            "untrusted"   => TrustLevel::Untrusted,
-            "trusted"     => TrustLevel::Trusted,
+            "untrusted" => TrustLevel::Untrusted,
+            "trusted" => TrustLevel::Trusted,
             "allowlisted" => TrustLevel::Allowlisted,
-            _             => TrustLevel::Standard,
+            _ => TrustLevel::Standard,
         }
     }
 
     pub fn as_str(&self) -> &'static str {
         match self {
-            TrustLevel::Untrusted   => "untrusted",
-            TrustLevel::Standard    => "standard",
-            TrustLevel::Trusted     => "trusted",
+            TrustLevel::Untrusted => "untrusted",
+            TrustLevel::Standard => "standard",
+            TrustLevel::Trusted => "trusted",
             TrustLevel::Allowlisted => "allowlisted",
         }
     }
@@ -55,8 +55,8 @@ impl TrustLevel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrustProfile {
     pub domain: String,
-    pub level:  TrustLevel,
-    pub source: String,   // "user" | "auto" | "compliance"
+    pub level: TrustLevel,
+    pub source: String, // "user" | "auto" | "compliance"
     pub set_at: i64,
 }
 
@@ -70,21 +70,27 @@ pub struct TrustStore {
 
 impl TrustStore {
     pub fn get(&self, domain: &str) -> TrustProfile {
-        self.profiles.get(domain).cloned().unwrap_or_else(|| TrustProfile {
-            domain: domain.to_owned(),
-            level:  TrustLevel::Standard,
-            source: "default".to_owned(),
-            set_at: 0,
-        })
+        self.profiles
+            .get(domain)
+            .cloned()
+            .unwrap_or_else(|| TrustProfile {
+                domain: domain.to_owned(),
+                level: TrustLevel::Standard,
+                source: "default".to_owned(),
+                set_at: 0,
+            })
     }
 
     pub fn set(&mut self, domain: &str, level: &str, source: &str) {
-        self.profiles.insert(domain.to_owned(), TrustProfile {
-            domain: domain.to_owned(),
-            level:  TrustLevel::from_str(level),
-            source: source.to_owned(),
-            set_at: crate::db::unix_now(),
-        });
+        self.profiles.insert(
+            domain.to_owned(),
+            TrustProfile {
+                domain: domain.to_owned(),
+                level: TrustLevel::from_str(level),
+                source: source.to_owned(),
+                set_at: crate::db::unix_now(),
+            },
+        );
     }
 
     pub fn all(&self) -> Vec<TrustProfile> {
@@ -116,7 +122,10 @@ mod tests {
     fn set_and_retrieve() {
         let mut store = TrustStore::default();
         store.set("payment.example.com", "allowlisted", "user");
-        assert_eq!(store.get("payment.example.com").level, TrustLevel::Allowlisted);
+        assert_eq!(
+            store.get("payment.example.com").level,
+            TrustLevel::Allowlisted
+        );
         assert!(!store.get("payment.example.com").level.blocker_active());
     }
 }

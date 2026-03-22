@@ -35,16 +35,16 @@ pub struct PrivacyConfig {
 impl Default for PrivacyConfig {
     fn default() -> Self {
         PrivacyConfig {
-            canvas_noise:           true,
-            audio_noise:            true,
-            font_noise:             true,
-            hw_concurrency_spoof:   Some(4),
-            webrtc_block:           true,
-            timezone_spoof:         false,  // opt-in — breaks some apps
-            battery_block:          true,
-            screen_normalize:       true,
-            peripheral_block:       true,
-            sab_block:              false,  // Needed by some WASM apps
+            canvas_noise: true,
+            audio_noise: true,
+            font_noise: true,
+            hw_concurrency_spoof: Some(4),
+            webrtc_block: true,
+            timezone_spoof: false, // opt-in — breaks some apps
+            battery_block: true,
+            screen_normalize: true,
+            peripheral_block: true,
+            sab_block: false, // Needed by some WASM apps
         }
     }
 }
@@ -58,7 +58,8 @@ impl PrivacyConfig {
         ];
 
         if self.canvas_noise {
-            lines.push(r#"
+            lines.push(
+                r#"
   // Canvas noise: add ±1 LSB per channel on getImageData
   const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
   CanvasRenderingContext2D.prototype.getImageData = function(...a) {
@@ -69,11 +70,14 @@ impl PrivacyConfig {
     }
     return d;
   };
-"#.to_owned());
+"#
+                .to_owned(),
+            );
         }
 
         if self.webrtc_block {
-            lines.push(r#"
+            lines.push(
+                r#"
   // Block WebRTC local IP leak
   if (window.RTCPeerConnection) {
     const orig = window.RTCPeerConnection;
@@ -83,18 +87,23 @@ impl PrivacyConfig {
     };
     Object.setPrototypeOf(window.RTCPeerConnection, orig);
   }
-"#.to_owned());
+"#
+                .to_owned(),
+            );
         }
 
         if self.battery_block {
-            lines.push(r#"
+            lines.push(
+                r#"
   // Block Battery Status API
   if (navigator.getBattery) {
     Object.defineProperty(navigator, 'getBattery', {
       value: () => Promise.reject(new DOMException('Not supported', 'NotSupportedError'))
     });
   }
-"#.to_owned());
+"#
+                .to_owned(),
+            );
         }
 
         if self.peripheral_block {
@@ -112,9 +121,12 @@ impl PrivacyConfig {
         }
 
         if let Some(cores) = self.hw_concurrency_spoof {
-            lines.push(format!(r#"
+            lines.push(format!(
+                r#"
   Object.defineProperty(navigator, 'hardwareConcurrency', {{ value: {}, writable: false }});
-"#, cores));
+"#,
+                cores
+            ));
         }
 
         lines.push("})();".to_owned());

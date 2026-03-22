@@ -49,7 +49,9 @@ pub enum CompatTier {
 }
 
 impl Default for CompatTier {
-    fn default() -> Self { CompatTier::Native }
+    fn default() -> Self {
+        CompatTier::Native
+    }
 }
 
 // ── Page health signals from frontend ────────────────────────────────────────
@@ -57,19 +59,17 @@ impl Default for CompatTier {
 /// Reported by the injected diatom-api.js after page load.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PageHealthReport {
-    pub url:                String,
-    pub js_errors:          u32,   // uncaught errors in first 3s
-    pub dom_mutation_storm: bool,  // > 500 DOM mutations/s (React/Angular churn)
-    pub blank_body:         bool,  // <body> has no rendered text after 3s
-    pub console_errors:     u32,   // console.error calls
+    pub url: String,
+    pub js_errors: u32,           // uncaught errors in first 3s
+    pub dom_mutation_storm: bool, // > 500 DOM mutations/s (React/Angular churn)
+    pub blank_body: bool,         // <body> has no rendered text after 3s
+    pub console_errors: u32,      // console.error calls
 }
 
 impl PageHealthReport {
     /// Returns true if the page shows signs of rendering incompatibility.
     pub fn appears_broken(&self) -> bool {
-        self.blank_body
-            || self.js_errors >= 5
-            || (self.js_errors >= 2 && self.console_errors >= 10)
+        self.blank_body || self.js_errors >= 5 || (self.js_errors >= 2 && self.console_errors >= 10)
     }
 }
 
@@ -80,7 +80,7 @@ pub struct CompatStore {
     /// Domains the user has marked as "always open in system browser".
     legacy_domains: HashSet<String>,
     /// Domains that triggered auto-detection this session.
-    auto_detected:  HashSet<String>,
+    auto_detected: HashSet<String>,
 }
 
 impl CompatStore {
@@ -163,7 +163,8 @@ pub const PAYMENT_DOMAINS: &[&str] = &[
     "online.95599.cn",    // ABC
     "pcenter.bank.ecitic.com",
     // Generic WebUSB/plugin payment indicators
-    "unionpay.com", "95516.com",
+    "unionpay.com",
+    "95516.com",
 ];
 
 /// Check if a domain is a known payment/banking system requiring plugin support.
@@ -195,15 +196,19 @@ mod tests {
     fn health_report_threshold_js_errors() {
         let ok = PageHealthReport {
             url: "https://ok.example.com".into(),
-            js_errors: 1, dom_mutation_storm: false,
-            blank_body: false, console_errors: 2,
+            js_errors: 1,
+            dom_mutation_storm: false,
+            blank_body: false,
+            console_errors: 2,
         };
         assert!(!ok.appears_broken());
 
         let broken = PageHealthReport {
             url: "https://broken.example.com".into(),
-            js_errors: 5, dom_mutation_storm: false,
-            blank_body: false, console_errors: 0,
+            js_errors: 5,
+            dom_mutation_storm: false,
+            blank_body: false,
+            console_errors: 0,
         };
         assert!(broken.appears_broken());
     }

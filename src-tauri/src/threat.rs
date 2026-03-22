@@ -38,30 +38,41 @@ static EMBEDDED_THREATS: Lazy<HashSet<&'static str>> = Lazy::new(|| {
     // Representative entries — real distribution comes from URLhaus/PhishTank
     [
         // Known cryptominer / coin-jacking domains
-        "coinhive.com", "coin-hive.com", "minero.cc", "cryptoloot.pro",
-        "webminepool.com", "jsecoin.com",
+        "coinhive.com",
+        "coin-hive.com",
+        "minero.cc",
+        "cryptoloot.pro",
+        "webminepool.com",
+        "jsecoin.com",
         // Known phishing infrastructure (static — changes rapidly in production)
-        "secure-paypa1.com", "paypa1-secure.com", "amazon-security-alert.com",
-        "appleid-verify-account.com", "microsoft-login-secure.com",
+        "secure-paypa1.com",
+        "paypa1-secure.com",
+        "amazon-security-alert.com",
+        "appleid-verify-account.com",
+        "microsoft-login-secure.com",
         // Known malware C2 (static examples)
-        "emotet-c2.example.com", "trickbot-cdn.example.net",
-    ].iter().cloned().collect()
+        "emotet-c2.example.com",
+        "trickbot-cdn.example.net",
+    ]
+    .iter()
+    .cloned()
+    .collect()
 });
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ThreatLevel {
     Clean,
-    Suspicious,    // domain age < 30 days
-    Malicious,     // in local list
-    BlockedByDoh,  // Quad9 returned NXDOMAIN
+    Suspicious,   // domain age < 30 days
+    Malicious,    // in local list
+    BlockedByDoh, // Quad9 returned NXDOMAIN
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThreatResult {
-    pub domain:       String,
-    pub level:        ThreatLevel,
-    pub reason:       String,
-    pub check_source: String,  // "local_list" | "quad9" | "age_heuristic" | "clean"
+    pub domain: String,
+    pub level: ThreatLevel,
+    pub reason: String,
+    pub check_source: String, // "local_list" | "quad9" | "age_heuristic" | "clean"
 }
 
 // ── Local list check ──────────────────────────────────────────────────────────
@@ -110,33 +121,37 @@ fn build_dns_query(domain: &str) -> Result<Vec<u8>> {
     let mut msg = Vec::with_capacity(64);
 
     // Header: ID=0xDEAD, flags=standard query, 1 question
-    msg.extend_from_slice(&[0xDE, 0xAD]);  // ID
-    msg.extend_from_slice(&[0x01, 0x00]);  // QR=0, Opcode=0, RD=1
-    msg.extend_from_slice(&[0x00, 0x01]);  // QDCOUNT=1
-    msg.extend_from_slice(&[0x00, 0x00]);  // ANCOUNT=0
-    msg.extend_from_slice(&[0x00, 0x00]);  // NSCOUNT=0
-    msg.extend_from_slice(&[0x00, 0x00]);  // ARCOUNT=0
+    msg.extend_from_slice(&[0xDE, 0xAD]); // ID
+    msg.extend_from_slice(&[0x01, 0x00]); // QR=0, Opcode=0, RD=1
+    msg.extend_from_slice(&[0x00, 0x01]); // QDCOUNT=1
+    msg.extend_from_slice(&[0x00, 0x00]); // ANCOUNT=0
+    msg.extend_from_slice(&[0x00, 0x00]); // NSCOUNT=0
+    msg.extend_from_slice(&[0x00, 0x00]); // ARCOUNT=0
 
     // Question: QNAME (length-prefixed labels), QTYPE=A(1), QCLASS=IN(1)
     for label in domain.split('.') {
         let l = label.as_bytes();
-        if l.len() > 63 { anyhow::bail!("label too long"); }
+        if l.len() > 63 {
+            anyhow::bail!("label too long");
+        }
         msg.push(l.len() as u8);
         msg.extend_from_slice(l);
     }
-    msg.push(0);              // root label
-    msg.extend_from_slice(&[0x00, 0x01]);  // QTYPE = A
-    msg.extend_from_slice(&[0x00, 0x01]);  // QCLASS = IN
+    msg.push(0); // root label
+    msg.extend_from_slice(&[0x00, 0x01]); // QTYPE = A
+    msg.extend_from_slice(&[0x00, 0x01]); // QCLASS = IN
 
     Ok(msg)
 }
 
 /// Parse a binary DNS response: check RCODE. NXDOMAIN (3) → Malicious.
 fn parse_dns_response(bytes: &[u8]) -> ThreatLevel {
-    if bytes.len() < 4 { return ThreatLevel::Clean; }
+    if bytes.len() < 4 {
+        return ThreatLevel::Clean;
+    }
     let rcode = bytes[3] & 0x0F;
     match rcode {
-        3 => ThreatLevel::BlockedByDoh,  // NXDOMAIN — Quad9 blocked this domain
+        3 => ThreatLevel::BlockedByDoh, // NXDOMAIN — Quad9 blocked this domain
         _ => ThreatLevel::Clean,
     }
 }
@@ -152,21 +167,25 @@ pub async fn check_domain_age(domain: &str) -> ThreatLevel {
     let url = format!("https://api.whoapi.com/?domain={domain}&r=whois&apikey=free");
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(4))
-        .build() {
+        .build()
+    {
         Ok(c) => c,
         Err(_) => return ThreatLevel::Clean,
     };
 
-    let Ok(resp) = client.get(&url).send().await else { return ThreatLevel::Clean; };
-    let Ok(text) = resp.text().await else { return ThreatLevel::Clean; };
+    let Ok(resp) = client.get(&url).send().await else {
+        return ThreatLevel::Clean;
+    };
+    let Ok(text) = resp.text().await else {
+        return ThreatLevel::Clean;
+    };
 
     // Heuristic: look for a creation_date-like field within 30 days
     // This is intentionally loose — false negatives are OK, false positives are not.
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
         if let Some(created) = json.get("date_created").and_then(|v| v.as_str()) {
             if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(created) {
-                let age_days = (chrono::Utc::now() - dt.with_timezone(&chrono::Utc))
-                    .num_days();
+                let age_days = (chrono::Utc::now() - dt.with_timezone(&chrono::Utc)).num_days();
                 if age_days < 30 {
                     return ThreatLevel::Suspicious;
                 }
@@ -190,9 +209,9 @@ pub async fn evaluate_domain(
     let local = check_local(domain, live_list);
     if local == ThreatLevel::Malicious {
         return ThreatResult {
-            domain:       domain.to_owned(),
-            level:        ThreatLevel::Malicious,
-            reason:       "该域名出现在本地威胁情报列表中（来源：abuse.ch / PhishTank）。".to_owned(),
+            domain: domain.to_owned(),
+            level: ThreatLevel::Malicious,
+            reason: "该域名出现在本地威胁情报列表中（来源：abuse.ch / PhishTank）。".to_owned(),
             check_source: "local_list".to_owned(),
         };
     }
@@ -202,9 +221,9 @@ pub async fn evaluate_domain(
         if let Ok(doh_result) = check_quad9(domain).await {
             if doh_result == ThreatLevel::BlockedByDoh {
                 return ThreatResult {
-                    domain:       domain.to_owned(),
-                    level:        ThreatLevel::Malicious,
-                    reason:       "Quad9 的独立威胁情报将此域名标记为恶意。已由 DNS 层拦截。".to_owned(),
+                    domain: domain.to_owned(),
+                    level: ThreatLevel::Malicious,
+                    reason: "Quad9 的独立威胁情报将此域名标记为恶意。已由 DNS 层拦截。".to_owned(),
                     check_source: "quad9".to_owned(),
                 };
             }
@@ -216,18 +235,19 @@ pub async fn evaluate_domain(
         let age_result = check_domain_age(domain).await;
         if age_result == ThreatLevel::Suspicious {
             return ThreatResult {
-                domain:       domain.to_owned(),
-                level:        ThreatLevel::Suspicious,
-                reason:       "此域名注册时间不足 30 天。新域名是钓鱼攻击的常用基础设施，请谨慎。".to_owned(),
+                domain: domain.to_owned(),
+                level: ThreatLevel::Suspicious,
+                reason: "此域名注册时间不足 30 天。新域名是钓鱼攻击的常用基础设施，请谨慎。"
+                    .to_owned(),
                 check_source: "age_heuristic".to_owned(),
             };
         }
     }
 
     ThreatResult {
-        domain:       domain.to_owned(),
-        level:        ThreatLevel::Clean,
-        reason:       String::new(),
+        domain: domain.to_owned(),
+        level: ThreatLevel::Clean,
+        reason: String::new(),
         check_source: "clean".to_owned(),
     }
 }
@@ -270,7 +290,7 @@ mod tests {
     fn local_check_hits_embedded() {
         let live: HashSet<String> = HashSet::new();
         assert_eq!(check_local("coinhive.com", &live), ThreatLevel::Malicious);
-        assert_eq!(check_local("github.com",   &live), ThreatLevel::Clean);
+        assert_eq!(check_local("github.com", &live), ThreatLevel::Clean);
     }
 
     #[test]
@@ -284,7 +304,7 @@ mod tests {
     #[test]
     fn nxdomain_detected() {
         // Craft a minimal NXDOMAIN response (RCODE=3)
-        let resp = vec![0xDE,0xAD, 0x81,0x83, 0,0, 0,0, 0,0, 0,0];
+        let resp = vec![0xDE, 0xAD, 0x81, 0x83, 0, 0, 0, 0, 0, 0, 0, 0];
         assert_eq!(parse_dns_response(&resp), ThreatLevel::BlockedByDoh);
     }
 }

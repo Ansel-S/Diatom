@@ -27,11 +27,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
     Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit, OsRng},
 };
 use anyhow::{Context, Result, bail};
-use flate2::{write::GzEncoder, Compression};
+use flate2::{Compression, write::GzEncoder};
 use hkdf::Hkdf;
 use rand::RngCore;
 use sha2::Sha256;
@@ -43,31 +43,54 @@ use zeroize::Zeroize;
 
 use crate::{
     blocker::is_blocked,
-    db::{new_id, unix_now, BundleRow},
+    db::{BundleRow, new_id, unix_now},
 };
 
 // ── Magic header ─────────────────────────────────────────────────────────────
-const EWBN_MAGIC: &[u8; 4]   = b"EWBT";
-const EWBN_VERSION: u32       = 1;
+const EWBN_MAGIC: &[u8; 4] = b"EWBT";
+const EWBN_VERSION: u32 = 1;
 
 // ── Tracker strip patterns (subset — kept in sync with blocker.rs) ────────────
 // These are matched against <script src="...">, <img src="...">, and inline URLs.
 const TRACKER_SCRIPT_DOMAINS: &[&str] = &[
-    "doubleclick.net", "googlesyndication.com", "googletagmanager.com",
-    "google-analytics.com", "connect.facebook.net", "pixel.facebook.com",
-    "hotjar.com", "amplitude.com", "api.segment.io", "cdn.segment.com",
-    "mixpanel.com", "clarity.ms", "fullstory.com", "chartbeat.com",
-    "parsely.com", "scorecardresearch.com", "bugsnag.com", "ingest.sentry.io",
-    "js-agent.newrelic.com", "nr-data.net", "adnxs.com", "adroll.com",
-    "criteo.com", "outbrain.com", "taboola.com", "adsrvr.org",
-    "munchkin.marketo.net", "js.hs-scripts.com", "cdn.heapanalytics.com",
-    "bat.bing.com", "px.ads.linkedin.com", "moatads.com",
+    "doubleclick.net",
+    "googlesyndication.com",
+    "googletagmanager.com",
+    "google-analytics.com",
+    "connect.facebook.net",
+    "pixel.facebook.com",
+    "hotjar.com",
+    "amplitude.com",
+    "api.segment.io",
+    "cdn.segment.com",
+    "mixpanel.com",
+    "clarity.ms",
+    "fullstory.com",
+    "chartbeat.com",
+    "parsely.com",
+    "scorecardresearch.com",
+    "bugsnag.com",
+    "ingest.sentry.io",
+    "js-agent.newrelic.com",
+    "nr-data.net",
+    "adnxs.com",
+    "adroll.com",
+    "criteo.com",
+    "outbrain.com",
+    "taboola.com",
+    "adsrvr.org",
+    "munchkin.marketo.net",
+    "js.hs-scripts.com",
+    "cdn.heapanalytics.com",
+    "bat.bing.com",
+    "px.ads.linkedin.com",
+    "moatads.com",
 ];
 
 // ── FreezeBundle ─────────────────────────────────────────────────────────────
 
 pub struct FreezeBundle {
-    pub bundle_row:  BundleRow,
+    pub bundle_row: BundleRow,
     pub bundle_path: PathBuf,
 }
 
@@ -104,25 +127,25 @@ pub fn freeze_page(
     };
 
     let row = BundleRow {
-        id:           id.clone(),
-        url:          url.to_owned(),
-        title:        title.to_owned(),
+        id: id.clone(),
+        url: url.to_owned(),
+        title: title.to_owned(),
         content_hash,
-        bundle_path:  filename,
-        tfidf_tags:   "[]".to_owned(),  // filled in by caller after TF-IDF
-        bundle_size:  std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) as i64,
-        frozen_at:    unix_now(),
+        bundle_path: filename,
+        tfidf_tags: "[]".to_owned(), // filled in by caller after TF-IDF
+        bundle_size: std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) as i64,
+        frozen_at: unix_now(),
         workspace_id: workspace_id.to_owned(),
     };
 
-    Ok(FreezeBundle { bundle_row: row, bundle_path: path })
+    Ok(FreezeBundle {
+        bundle_row: row,
+        bundle_path: path,
+    })
 }
 
 /// Decrypt and return the stripped HTML for a frozen bundle.
-pub fn thaw_bundle(
-    bundle_path: &Path,
-    master_key: &[u8; 32],
-) -> Result<String> {
+pub fn thaw_bundle(bundle_path: &Path, master_key: &[u8; 32]) -> Result<String> {
     let raw = std::fs::read(bundle_path).context("read .ewbn")?;
     let ciphertext = parse_ewbn(&raw)?;
     let bundle_key = derive_bundle_key(master_key)?;
@@ -137,8 +160,8 @@ pub fn thaw_bundle(
 /// Also removes tracking pixel patterns (1×1 images).
 /// Pure string-level scan — no DOM parser needed for this level of accuracy.
 fn strip_trackers(html: &str) -> String {
-    use once_cell::sync::Lazy;
     use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
+    use once_cell::sync::Lazy;
 
     static AC: Lazy<AhoCorasick> = Lazy::new(|| {
         AhoCorasickBuilder::new()
@@ -149,7 +172,7 @@ fn strip_trackers(html: &str) -> String {
     });
 
     let mut output = String::with_capacity(html.len());
-    let mut pos    = 0;
+    let mut pos = 0;
 
     while pos < html.len() {
         // Find next tag-like opening
@@ -158,7 +181,8 @@ fn strip_trackers(html: &str) -> String {
             output.push_str(&html[pos..tag_start]);
 
             // Find the end of this tag
-            let tag_end = html[tag_start..].find('>')
+            let tag_end = html[tag_start..]
+                .find('>')
                 .map(|i| tag_start + i + 1)
                 .unwrap_or(html.len());
 
@@ -166,15 +190,17 @@ fn strip_trackers(html: &str) -> String {
 
             // Check if it's a script/img/iframe with a tracker src/href
             let lower = tag.to_lowercase();
-            let is_external = lower.starts_with("<script") || lower.starts_with("<img")
-                || lower.starts_with("<iframe") || lower.starts_with("<link");
+            let is_external = lower.starts_with("<script")
+                || lower.starts_with("<img")
+                || lower.starts_with("<iframe")
+                || lower.starts_with("<link");
 
             let has_tracker_src = is_external && AC.is_match(tag);
 
             // Also check for 1×1 tracking pixel pattern
-            let is_tracking_pixel = lower.starts_with("<img") &&
-                (lower.contains("width=\"1\"") || lower.contains("width='1'")) &&
-                (lower.contains("height=\"1\"") || lower.contains("height='1'"));
+            let is_tracking_pixel = lower.starts_with("<img")
+                && (lower.contains("width=\"1\"") || lower.contains("width='1'"))
+                && (lower.contains("height=\"1\"") || lower.contains("height='1'"));
 
             // Third-party cookie setting: remove <script> that set document.cookie
             // for cross-origin purposes (heuristic: src from different domain)
@@ -216,7 +242,7 @@ fn strip_trackers(html: &str) -> String {
 // ── Crypto helpers ────────────────────────────────────────────────────────────
 
 fn derive_bundle_key(master_key: &[u8; 32]) -> Result<[u8; 32]> {
-    let hk  = Hkdf::<Sha256>::new(None, master_key);
+    let hk = Hkdf::<Sha256>::new(None, master_key);
     let mut key = [0u8; 32];
     hk.expand(b"freeze-v7", &mut key)
         .map_err(|_| anyhow::anyhow!("HKDF expand failed"))?;
@@ -227,8 +253,9 @@ fn aes_gcm_encrypt(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>> {
     let cipher = Aes256Gcm::new(key.into());
     let mut nonce_bytes = [0u8; 12];
     OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce  = Nonce::from_slice(&nonce_bytes);
-    let ct     = cipher.encrypt(nonce, plaintext)
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ct = cipher
+        .encrypt(nonce, plaintext)
         .map_err(|_| anyhow::anyhow!("AES-GCM encrypt failed"))?;
     // Prepend nonce to ciphertext
     let mut out = Vec::with_capacity(12 + ct.len());
@@ -246,8 +273,9 @@ fn aes_gcm_decrypt(key: &[u8; 32], mut data: Vec<u8>) -> Result<Vec<u8>> {
     data.zeroize();
 
     let cipher = Aes256Gcm::new(key.into());
-    let nonce  = Nonce::from_slice(&nonce_bytes);
-    cipher.decrypt(nonce, ct.as_ref())
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    cipher
+        .decrypt(nonce, ct.as_ref())
         .map_err(|_| anyhow::anyhow!("AES-GCM decrypt failed — wrong key or corrupted bundle"))
 }
 
@@ -280,11 +308,17 @@ fn write_ewbn(path: &Path, payload: &[u8]) -> Result<()> {
 
 /// Returns the ciphertext payload (nonce + ct + tag).
 fn parse_ewbn(raw: &[u8]) -> Result<Vec<u8>> {
-    if raw.len() < 16 { bail!("not a valid .ewbn file"); }
-    if &raw[..4] != EWBN_MAGIC { bail!("invalid magic bytes"); }
+    if raw.len() < 16 {
+        bail!("not a valid .ewbn file");
+    }
+    if &raw[..4] != EWBN_MAGIC {
+        bail!("invalid magic bytes");
+    }
     let _version = u32::from_le_bytes(raw[4..8].try_into().unwrap());
-    let len      = u64::from_le_bytes(raw[8..16].try_into().unwrap()) as usize;
-    if raw.len() < 16 + len { bail!("truncated .ewbn"); }
+    let len = u64::from_le_bytes(raw[8..16].try_into().unwrap()) as usize;
+    if raw.len() < 16 + len {
+        bail!("truncated .ewbn");
+    }
     Ok(raw[16..16 + len].to_vec())
 }
 
@@ -330,7 +364,9 @@ pub fn get_or_init_master_key(db: &crate::db::Db) -> Result<[u8; 32]> {
 
     if let Some(hex_key) = db.get_setting("master_key_hex") {
         let bytes = hex::decode(&hex_key).context("decode master key")?;
-        if bytes.len() != 32 { bail!("invalid master key length"); }
+        if bytes.len() != 32 {
+            bail!("invalid master key length");
+        }
         let mut arr = [0u8; 32];
         arr.copy_from_slice(&bytes);
         return Ok(arr);
@@ -352,12 +388,22 @@ fn macos_keychain_read() -> Option<[u8; 32]> {
     // security(1) CLI is available on all macOS versions.
     // We use the generic-password store under the Diatom service name.
     let out = Command::new("security")
-        .args(["find-generic-password", "-s", "com.ansel-s.diatom.masterkey", "-w"])
-        .output().ok()?;
-    if !out.status.success() { return None; }
+        .args([
+            "find-generic-password",
+            "-s",
+            "com.ansel-s.diatom.masterkey",
+            "-w",
+        ])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
     let hex = String::from_utf8(out.stdout).ok()?;
     let bytes = hex::decode(hex.trim()).ok()?;
-    if bytes.len() != 32 { return None; }
+    if bytes.len() != 32 {
+        return None;
+    }
     let mut arr = [0u8; 32];
     arr.copy_from_slice(&bytes);
     Some(arr)
@@ -369,12 +415,25 @@ fn macos_keychain_write(key: &[u8; 32]) -> bool {
     let hex_key = hex::encode(key);
     // Delete any existing entry first (add fails if the item already exists).
     let _ = Command::new("security")
-        .args(["delete-generic-password", "-s", "com.ansel-s.diatom.masterkey"])
+        .args([
+            "delete-generic-password",
+            "-s",
+            "com.ansel-s.diatom.masterkey",
+        ])
         .output();
     Command::new("security")
-        .args(["add-generic-password", "-s", "com.ansel-s.diatom.masterkey",
-               "-a", "diatom", "-w", &hex_key])
-        .status().map(|s| s.success()).unwrap_or(false)
+        .args([
+            "add-generic-password",
+            "-s",
+            "com.ansel-s.diatom.masterkey",
+            "-a",
+            "diatom",
+            "-w",
+            &hex_key,
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 // ── Windows DPAPI ────────────────────────────────────────────────────────────
@@ -391,16 +450,30 @@ fn windows_dpapi_read(db: &crate::db::Db) -> Option<[u8; 32]> {
 
 #[cfg(target_os = "windows")]
 unsafe fn dpapi_decrypt(data: &[u8]) -> Option<[u8; 32]> {
-    use windows_sys::Win32::Security::Cryptography::{
-        CryptUnprotectData, CRYPTOAPI_BLOB,
+    use windows_sys::Win32::Security::Cryptography::{CRYPTOAPI_BLOB, CryptUnprotectData};
+    let mut in_blob = CRYPTOAPI_BLOB {
+        cbData: data.len() as u32,
+        pbData: data.as_ptr() as *mut _,
     };
-    let mut in_blob = CRYPTOAPI_BLOB { cbData: data.len() as u32, pbData: data.as_ptr() as *mut _ };
-    let mut out_blob = CRYPTOAPI_BLOB { cbData: 0, pbData: std::ptr::null_mut() };
-    if CryptUnprotectData(&mut in_blob, std::ptr::null_mut(), std::ptr::null_mut(),
-                          std::ptr::null_mut(), std::ptr::null_mut(), 0, &mut out_blob) == 0 {
+    let mut out_blob = CRYPTOAPI_BLOB {
+        cbData: 0,
+        pbData: std::ptr::null_mut(),
+    };
+    if CryptUnprotectData(
+        &mut in_blob,
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+        0,
+        &mut out_blob,
+    ) == 0
+    {
         return None;
     }
-    if out_blob.cbData as usize != 32 { return None; }
+    if out_blob.cbData as usize != 32 {
+        return None;
+    }
     let mut arr = [0u8; 32];
     std::ptr::copy_nonoverlapping(out_blob.pbData, arr.as_mut_ptr(), 32);
     windows_sys::Win32::Foundation::LocalFree(out_blob.pbData as _);
@@ -414,10 +487,10 @@ mod tests {
 
     #[test]
     fn roundtrip_encrypt_decrypt() {
-        let key    = [0x42u8; 32];
-        let plain  = b"hello diatom freeze test";
-        let ct     = aes_gcm_encrypt(&key, plain).unwrap();
-        let dec    = aes_gcm_decrypt(&key, ct).unwrap();
+        let key = [0x42u8; 32];
+        let plain = b"hello diatom freeze test";
+        let ct = aes_gcm_encrypt(&key, plain).unwrap();
+        let dec = aes_gcm_decrypt(&key, ct).unwrap();
         assert_eq!(dec, plain);
     }
 
@@ -437,10 +510,17 @@ mod tests {
 
     #[test]
     fn ewbn_roundtrip() {
-        let dir    = tempdir().unwrap();
-        let key    = [0xABu8; 32];
-        let html   = "<html><body>test freeze</body></html>";
-        let result = freeze_page(html, "https://example.com", "Test", "ws-0", &key, dir.path());
+        let dir = tempdir().unwrap();
+        let key = [0xABu8; 32];
+        let html = "<html><body>test freeze</body></html>";
+        let result = freeze_page(
+            html,
+            "https://example.com",
+            "Test",
+            "ws-0",
+            &key,
+            dir.path(),
+        );
         assert!(result.is_ok());
         let bundle = result.unwrap();
         let thawed = thaw_bundle(&bundle.bundle_path, &key).unwrap();

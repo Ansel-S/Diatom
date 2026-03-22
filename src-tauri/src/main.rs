@@ -29,9 +29,9 @@ mod utils;
 mod war_report;
 mod zen;
 
-use std::sync::{atomic::AtomicBool, Arc};
 use anyhow::Result;
 use state::AppState;
+use std::sync::{Arc, atomic::AtomicBool};
 use tauri::{Builder, Emitter, Manager};
 
 fn main() {
@@ -148,7 +148,11 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let data_dir = app.path().app_data_dir()?;
     std::fs::create_dir_all(&data_dir)?;
 
-    tracing::info!("Diatom v{} — data: {:?}", env!("CARGO_PKG_VERSION"), data_dir);
+    tracing::info!(
+        "Diatom v{} — data: {:?}",
+        env!("CARGO_PKG_VERSION"),
+        data_dir
+    );
 
     let state = AppState::new(data_dir)?;
 
@@ -170,9 +174,9 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // SLM server background task (when lab enabled)
     if labs::is_lab_enabled(&st.db, "slm_server") {
         let privacy_mode = labs::is_lab_enabled(&st.db, "slm_extreme_privacy");
-        let preferred    = st.db.get_setting("slm_active_model");
-        let shutdown     = Arc::new(AtomicBool::new(false));
-        let shutdown_c   = Arc::clone(&shutdown);
+        let preferred = st.db.get_setting("slm_active_model");
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_c = Arc::clone(&shutdown);
         *st.slm_shutdown.lock().unwrap() = Some(shutdown);
         tauri::async_runtime::spawn(async move {
             let server = Arc::new(slm::SlmServer::new(privacy_mode, preferred.as_deref()).await);
@@ -188,13 +192,15 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                 if let Some(st) = ah.try_state::<AppState>() {
-                    let cfg   = st.tab_budget_cfg.lock().unwrap().clone();
+                    let cfg = st.tab_budget_cfg.lock().unwrap().clone();
                     let omega = st.tabs.lock().unwrap().avg_mem_weight();
                     let count = st.tabs.lock().unwrap().count() as u32;
-                    let sw    = *st.screen_width_px.lock().unwrap();
-                    let b     = tab_budget::compute_budget(&cfg, sw, omega, count);
-                    let _ = ah.emit("diatom:budget-update",
-                        serde_json::to_value(&b).unwrap_or_default());
+                    let sw = *st.screen_width_px.lock().unwrap();
+                    let b = tab_budget::compute_budget(&cfg, sw, omega, count);
+                    let _ = ah.emit(
+                        "diatom:budget-update",
+                        serde_json::to_value(&b).unwrap_or_default(),
+                    );
                 }
             }
         });
@@ -208,8 +214,10 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             if let Some(st) = ah.try_state::<AppState>() {
                 if st.quad9_enabled.load(std::sync::atomic::Ordering::Relaxed) {
                     if let Ok(list) = threat::fetch_live_list().await {
-                        let _ = st.db.set_setting("threat_list_json",
-                            &serde_json::to_string(&list).unwrap_or_default());
+                        let _ = st.db.set_setting(
+                            "threat_list_json",
+                            &serde_json::to_string(&list).unwrap_or_default(),
+                        );
                         *st.threat_list.write().unwrap() = list;
                         tracing::info!("threat list refreshed");
                     }

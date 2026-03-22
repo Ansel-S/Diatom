@@ -37,25 +37,25 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TabBudgetConfig {
     /// Memory allocation ratio ρ (0.0–1.0). Default 0.20.
-    pub memory_ratio:   f64,
+    pub memory_ratio: f64,
     /// Hard floor — always allow at least this many tabs.
-    pub min_tabs:       u32,
+    pub min_tabs: u32,
     /// Hard ceiling — never exceed this regardless of memory.
-    pub max_tabs_hard:  u32,
+    pub max_tabs_hard: u32,
     /// Enable Screen Gravity ceiling adjustment.
     pub screen_gravity: bool,
     /// Golden Ratio zone scheduling enabled.
-    pub golden_ratio:   bool,
+    pub golden_ratio: bool,
 }
 
 impl Default for TabBudgetConfig {
     fn default() -> Self {
         TabBudgetConfig {
-            memory_ratio:   0.20,
-            min_tabs:       3,
-            max_tabs_hard:  10,
+            memory_ratio: 0.20,
+            min_tabs: 3,
+            max_tabs_hard: 10,
             screen_gravity: true,
-            golden_ratio:   true,
+            golden_ratio: true,
         }
     }
 }
@@ -97,9 +97,9 @@ const PHI: f64 = 1.618_033_988_749_895;
 /// `omega_avg_bytes`: average awake tab memory weight in bytes.
 /// `current_tab_count`: how many tabs are currently open.
 pub fn compute_budget(
-    cfg:              &TabBudgetConfig,
-    screen_width_px:  u32,
-    omega_avg_bytes:  u64,
+    cfg: &TabBudgetConfig,
+    screen_width_px: u32,
+    omega_avg_bytes: u64,
     current_tab_count: u32,
 ) -> TabBudget {
     let m_available = available_memory_bytes();
@@ -116,10 +116,10 @@ pub fn compute_budget(
     // ── Model C: Screen Gravity ceiling ───────────────────────────────────────
     let screen_ceiling = if cfg.screen_gravity {
         match screen_width_px {
-            0..=1023  => 3,
+            0..=1023 => 3,
             1024..=1599 => 8,
             1600..=2559 => 10,
-            _           => 13,  // Fibonacci — ultrawide / dual-monitor
+            _ => 13, // Fibonacci — ultrawide / dual-monitor
         }
     } else {
         cfg.max_tabs_hard
@@ -188,7 +188,9 @@ pub fn available_memory_bytes() -> u64 {
                 let pages_free: u64 = parse_vm_stat_field(&text, "Pages free");
                 let pages_inactive: u64 = parse_vm_stat_field(&text, "Pages inactive");
                 let total = (pages_free + pages_inactive) * page_size;
-                if total > 0 { return total; }
+                if total > 0 {
+                    return total;
+                }
             }
         }
     }
@@ -196,12 +198,15 @@ pub fn available_memory_bytes() -> u64 {
     #[cfg(target_os = "linux")]
     {
         if let Ok(text) = std::fs::read_to_string("/proc/meminfo") {
-            let available: u64 = text.lines()
+            let available: u64 = text
+                .lines()
                 .find(|l| l.starts_with("MemAvailable:"))
                 .and_then(|l| l.split_whitespace().nth(1))
                 .and_then(|n| n.parse().ok())
                 .unwrap_or(0);
-            if available > 0 { return available * 1024; }
+            if available > 0 {
+                return available * 1024;
+            }
         }
     }
 
@@ -238,7 +243,10 @@ mod tests {
 
     #[test]
     fn golden_ratio_focus_is_roughly_61pct() {
-        let cfg = TabBudgetConfig { max_tabs_hard: 10, ..Default::default() };
+        let cfg = TabBudgetConfig {
+            max_tabs_hard: 10,
+            ..Default::default()
+        };
         // Force t_max to 10 by giving lots of memory
         let budget = compute_budget(&cfg, 1920, 1024 * 1024, 0);
         // With t_max=10: focus = floor(10/1.618) = floor(6.18) = 6
@@ -265,7 +273,10 @@ mod tests {
 
     #[test]
     fn pressure_shortens_sleep_timer() {
-        let cfg = TabBudgetConfig { max_tabs_hard: 10, ..Default::default() };
+        let cfg = TabBudgetConfig {
+            max_tabs_hard: 10,
+            ..Default::default()
+        };
         let budget_low = compute_budget(&cfg, 1920, 1024 * 1024, 2);
         let budget_high = compute_budget(&cfg, 1920, 1024 * 1024, 9);
         assert!(budget_high.sleep_timer_s < budget_low.sleep_timer_s);
@@ -273,7 +284,11 @@ mod tests {
 
     #[test]
     fn min_floor_respected() {
-        let cfg = TabBudgetConfig { memory_ratio: 0.001, min_tabs: 3, ..Default::default() };
+        let cfg = TabBudgetConfig {
+            memory_ratio: 0.001,
+            min_tabs: 3,
+            ..Default::default()
+        };
         // Tiny memory ratio forces a very low budget, but floor = 3
         let budget = compute_budget(&cfg, 1920, 200 * 1024 * 1024, 0);
         assert!(budget.t_max >= 3);

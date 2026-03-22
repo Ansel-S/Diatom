@@ -36,10 +36,10 @@
 //   GET  /health
 // ─────────────────────────────────────────────────────────────────────────────
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::net::TcpListener;
 
 // ── Curated model catalogue ───────────────────────────────────────────────────
@@ -50,34 +50,34 @@ use tokio::net::TcpListener;
 ///   - Privacy-safe licence (Apache 2.0 / MIT)
 pub const CURATED_MODELS: &[SlmModel] = &[
     SlmModel {
-        id:          "diatom-fast",
+        id: "diatom-fast",
         ollama_name: "qwen2.5:3b",
         description: "Qwen 2.5 3B — fast responses, low VRAM, daily tasks",
-        size_gb:     2.0,
+        size_gb: 2.0,
         context_len: 32_768,
     },
     SlmModel {
-        id:          "diatom-balanced",
+        id: "diatom-balanced",
         ollama_name: "phi4-mini",
         description: "Phi-4 Mini 3.8B — Microsoft's best small model, reasoning + code",
-        size_gb:     2.5,
+        size_gb: 2.5,
         context_len: 16_384,
     },
     SlmModel {
-        id:          "diatom-deep",
+        id: "diatom-deep",
         ollama_name: "gemma3:4b",
         description: "Gemma 3 4B — Google DeepMind, long context, multilingual",
-        size_gb:     3.3,
+        size_gb: 3.3,
         context_len: 131_072,
     },
 ];
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SlmModel {
-    pub id:          &'static str,
+    pub id: &'static str,
     pub ollama_name: &'static str,
     pub description: &'static str,
-    pub size_gb:     f32,
+    pub size_gb: f32,
     pub context_len: u32,
 }
 
@@ -98,10 +98,10 @@ pub enum SlmBackend {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SlmStatus {
-    pub backend:          SlmBackend,
-    pub active_model:     Option<String>,
+    pub backend: SlmBackend,
+    pub active_model: Option<String>,
     pub server_listening: bool,
-    pub privacy_mode:     bool,
+    pub privacy_mode: bool,
     pub available_models: Vec<String>,
 }
 
@@ -114,7 +114,8 @@ pub async fn detect_backend(privacy_mode: bool) -> SlmBackend {
     if let Ok(resp) = reqwest::Client::new()
         .get("http://127.0.0.1:11434/api/tags")
         .timeout(std::time::Duration::from_millis(500))
-        .send().await
+        .send()
+        .await
     {
         if resp.status().is_success() {
             return SlmBackend::Ollama;
@@ -125,7 +126,8 @@ pub async fn detect_backend(privacy_mode: bool) -> SlmBackend {
     if let Ok(resp) = reqwest::Client::new()
         .get("http://127.0.0.1:8080/health")
         .timeout(std::time::Duration::from_millis(500))
-        .send().await
+        .send()
+        .await
     {
         if resp.status().is_success() {
             return SlmBackend::LlamaCpp;
@@ -139,53 +141,53 @@ pub async fn detect_backend(privacy_mode: bool) -> SlmBackend {
 
 #[derive(Debug, Deserialize)]
 pub struct ChatRequest {
-    pub model:    String,
+    pub model: String,
     pub messages: Vec<ChatMessage>,
-    pub stream:   Option<bool>,
+    pub stream: Option<bool>,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
-    pub role:    String,   // "system" | "user" | "assistant"
+    pub role: String, // "system" | "user" | "assistant"
     pub content: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ChatResponse {
-    pub id:      String,
-    pub object:  &'static str,
+    pub id: String,
+    pub object: &'static str,
     pub created: i64,
-    pub model:   String,
+    pub model: String,
     pub choices: Vec<Choice>,
-    pub usage:   Usage,
+    pub usage: Usage,
 }
 
 #[derive(Debug, Serialize)]
 pub struct Choice {
-    pub index:         u32,
-    pub message:       ChatMessage,
+    pub index: u32,
+    pub message: ChatMessage,
     pub finish_reason: &'static str,
 }
 
 #[derive(Debug, Serialize)]
 pub struct Usage {
-    pub prompt_tokens:     u32,
+    pub prompt_tokens: u32,
     pub completion_tokens: u32,
-    pub total_tokens:      u32,
+    pub total_tokens: u32,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ModelsResponse {
     pub object: &'static str,
-    pub data:   Vec<ModelInfo>,
+    pub data: Vec<ModelInfo>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ModelInfo {
-    pub id:      String,
-    pub object:  &'static str,
+    pub id: String,
+    pub object: &'static str,
     pub created: i64,
     pub owned_by: &'static str,
 }
@@ -197,18 +199,20 @@ pub const SLM_PORT: u16 = 11435;
 /// SLM server state shared across request handlers.
 #[derive(Clone)]
 pub struct SlmServer {
-    pub backend:       SlmBackend,
-    pub active_model:  String,
-    pub privacy_mode:  bool,
+    pub backend: SlmBackend,
+    pub active_model: String,
+    pub privacy_mode: bool,
 }
 
 impl SlmServer {
     pub async fn new(privacy_mode: bool, preferred_model: Option<&str>) -> Self {
         let backend = detect_backend(privacy_mode).await;
-        let active_model = preferred_model
-            .unwrap_or("diatom-balanced")
-            .to_owned();
-        SlmServer { backend, active_model, privacy_mode }
+        let active_model = preferred_model.unwrap_or("diatom-balanced").to_owned();
+        SlmServer {
+            backend,
+            active_model,
+            privacy_mode,
+        }
     }
 
     /// Resolve a Diatom model alias to the backend-specific name.
@@ -216,9 +220,9 @@ impl SlmServer {
         // Allow direct Ollama model names to pass through
         if let Some(curated) = CURATED_MODELS.iter().find(|m| m.id == requested) {
             match self.backend {
-                SlmBackend::Ollama   => curated.ollama_name.to_owned(),
+                SlmBackend::Ollama => curated.ollama_name.to_owned(),
                 SlmBackend::LlamaCpp => curated.ollama_name.to_owned(),
-                _                   => requested.to_owned(),
+                _ => requested.to_owned(),
             }
         } else {
             requested.to_owned()
@@ -240,56 +244,66 @@ impl SlmServer {
     async fn chat_via_ollama(&self, req: &ChatRequest, model: &str) -> Result<ChatResponse> {
         #[derive(Serialize)]
         struct OllamaReq<'a> {
-            model:    &'a str,
+            model: &'a str,
             messages: &'a [ChatMessage],
-            stream:   bool,
-            options:  OllamaOptions,
+            stream: bool,
+            options: OllamaOptions,
         }
         #[derive(Serialize)]
-        struct OllamaOptions { num_predict: u32, temperature: f32 }
+        struct OllamaOptions {
+            num_predict: u32,
+            temperature: f32,
+        }
 
         #[derive(Deserialize)]
         struct OllamaResp {
-            message:              OllamaMsg,
-            prompt_eval_count:    Option<u32>,
-            eval_count:           Option<u32>,
+            message: OllamaMsg,
+            prompt_eval_count: Option<u32>,
+            eval_count: Option<u32>,
         }
         #[derive(Deserialize)]
-        struct OllamaMsg { content: String }
+        struct OllamaMsg {
+            content: String,
+        }
 
         let body = OllamaReq {
             model,
             messages: &req.messages,
-            stream:   false,
-            options:  OllamaOptions {
-                num_predict:  req.max_tokens.unwrap_or(2048),
-                temperature:  req.temperature.unwrap_or(0.7),
+            stream: false,
+            options: OllamaOptions {
+                num_predict: req.max_tokens.unwrap_or(2048),
+                temperature: req.temperature.unwrap_or(0.7),
             },
         };
 
         let resp: OllamaResp = reqwest::Client::new()
             .post("http://127.0.0.1:11434/api/chat")
             .json(&body)
-            .send().await?
-            .json().await?;
+            .send()
+            .await?
+            .json()
+            .await?;
 
-        let prompt_t  = resp.prompt_eval_count.unwrap_or(0);
-        let compl_t   = resp.eval_count.unwrap_or(0);
+        let prompt_t = resp.prompt_eval_count.unwrap_or(0);
+        let compl_t = resp.eval_count.unwrap_or(0);
 
         Ok(ChatResponse {
-            id:      format!("chatcmpl-{}", crate::db::new_id()),
-            object:  "chat.completion",
+            id: format!("chatcmpl-{}", crate::db::new_id()),
+            object: "chat.completion",
             created: crate::db::unix_now(),
-            model:   model.to_owned(),
+            model: model.to_owned(),
             choices: vec![Choice {
-                index:         0,
-                message:       ChatMessage { role: "assistant".into(), content: resp.message.content },
+                index: 0,
+                message: ChatMessage {
+                    role: "assistant".into(),
+                    content: resp.message.content,
+                },
                 finish_reason: "stop",
             }],
             usage: Usage {
-                prompt_tokens:     prompt_t,
+                prompt_tokens: prompt_t,
                 completion_tokens: compl_t,
-                total_tokens:      prompt_t + compl_t,
+                total_tokens: prompt_t + compl_t,
             },
         })
     }
@@ -297,45 +311,61 @@ impl SlmServer {
     async fn chat_via_llamacpp(&self, req: &ChatRequest) -> Result<ChatResponse> {
         #[derive(Serialize)]
         struct LlamaReq<'a> {
-            messages:    &'a [ChatMessage],
-            n_predict:   u32,
+            messages: &'a [ChatMessage],
+            n_predict: u32,
             temperature: f32,
         }
         #[derive(Deserialize)]
-        struct LlamaResp { content: String, tokens_evaluated: Option<u32>, tokens_predicted: Option<u32> }
+        struct LlamaResp {
+            content: String,
+            tokens_evaluated: Option<u32>,
+            tokens_predicted: Option<u32>,
+        }
 
         let body = LlamaReq {
-            messages:    &req.messages,
-            n_predict:   req.max_tokens.unwrap_or(2048),
+            messages: &req.messages,
+            n_predict: req.max_tokens.unwrap_or(2048),
             temperature: req.temperature.unwrap_or(0.7),
         };
 
         let resp: LlamaResp = reqwest::Client::new()
             .post("http://127.0.0.1:8080/v1/chat/completions")
             .json(&body)
-            .send().await?
-            .json().await?;
+            .send()
+            .await?
+            .json()
+            .await?;
 
         let pt = resp.tokens_evaluated.unwrap_or(0);
         let ct = resp.tokens_predicted.unwrap_or(0);
 
         Ok(ChatResponse {
-            id:      format!("chatcmpl-{}", crate::db::new_id()),
-            object:  "chat.completion",
+            id: format!("chatcmpl-{}", crate::db::new_id()),
+            object: "chat.completion",
             created: crate::db::unix_now(),
-            model:   self.active_model.clone(),
+            model: self.active_model.clone(),
             choices: vec![Choice {
-                index:         0,
-                message:       ChatMessage { role: "assistant".into(), content: resp.content },
+                index: 0,
+                message: ChatMessage {
+                    role: "assistant".into(),
+                    content: resp.content,
+                },
                 finish_reason: "stop",
             }],
-            usage: Usage { prompt_tokens: pt, completion_tokens: ct, total_tokens: pt + ct },
+            usage: Usage {
+                prompt_tokens: pt,
+                completion_tokens: ct,
+                total_tokens: pt + ct,
+            },
         })
     }
 
     /// Candle fallback: honest about limitations, tells user to install Ollama.
     async fn chat_candle_fallback(&self, req: &ChatRequest) -> Result<ChatResponse> {
-        let last_user = req.messages.iter().rev()
+        let last_user = req
+            .messages
+            .iter()
+            .rev()
             .find(|m| m.role == "user")
             .map(|m| m.content.as_str())
             .unwrap_or("");
@@ -359,36 +389,49 @@ impl SlmServer {
         };
 
         Ok(ChatResponse {
-            id:      format!("chatcmpl-{}", crate::db::new_id()),
-            object:  "chat.completion",
+            id: format!("chatcmpl-{}", crate::db::new_id()),
+            object: "chat.completion",
             created: crate::db::unix_now(),
-            model:   "candle-wasm-fallback".to_owned(),
+            model: "candle-wasm-fallback".to_owned(),
             choices: vec![Choice {
-                index:         0,
-                message:       ChatMessage { role: "assistant".into(), content: reply },
+                index: 0,
+                message: ChatMessage {
+                    role: "assistant".into(),
+                    content: reply,
+                },
                 finish_reason: "stop",
             }],
-            usage: Usage { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+            usage: Usage {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+            },
         })
     }
 
     pub fn models_response(&self) -> ModelsResponse {
         let now = crate::db::unix_now();
-        let data = CURATED_MODELS.iter().map(|m| ModelInfo {
-            id:       m.id.to_owned(),
-            object:   "model",
-            created:  now,
-            owned_by: "diatom",
-        }).collect();
-        ModelsResponse { object: "list", data }
+        let data = CURATED_MODELS
+            .iter()
+            .map(|m| ModelInfo {
+                id: m.id.to_owned(),
+                object: "model",
+                created: now,
+                owned_by: "diatom",
+            })
+            .collect();
+        ModelsResponse {
+            object: "list",
+            data,
+        }
     }
 
     pub fn status(&self) -> SlmStatus {
         SlmStatus {
-            backend:          self.backend.clone(),
-            active_model:     Some(self.active_model.clone()),
+            backend: self.backend.clone(),
+            active_model: Some(self.active_model.clone()),
             server_listening: true,
-            privacy_mode:     self.privacy_mode,
+            privacy_mode: self.privacy_mode,
             available_models: CURATED_MODELS.iter().map(|m| m.id.to_owned()).collect(),
         }
     }
@@ -413,8 +456,14 @@ impl SlmServer {
 pub async fn run_server(server: Arc<SlmServer>, shutdown: Arc<AtomicBool>) {
     let addr = format!("127.0.0.1:{}", SLM_PORT);
     let listener = match TcpListener::bind(&addr).await {
-        Ok(l) => { tracing::info!("SLM server listening on {}", addr); l }
-        Err(e) => { tracing::error!("SLM server failed to bind {}: {}", addr, e); return; }
+        Ok(l) => {
+            tracing::info!("SLM server listening on {}", addr);
+            l
+        }
+        Err(e) => {
+            tracing::error!("SLM server failed to bind {}: {}", addr, e);
+            return;
+        }
     };
 
     loop {
@@ -429,7 +478,9 @@ pub async fn run_server(server: Arc<SlmServer>, shutdown: Arc<AtomicBool>) {
             } => break,
         };
 
-        if shutdown.load(Ordering::Relaxed) { break; }
+        if shutdown.load(Ordering::Relaxed) {
+            break;
+        }
 
         let (stream, _) = match accept_result {
             Ok(s) => s,
@@ -460,12 +511,15 @@ async fn handle_connection(server: Arc<SlmServer>, mut stream: tokio::net::TcpSt
             header_end = pos;
             break;
         }
-        if header_buf.len() > 8192 { return; } // malformed / too large headers
+        if header_buf.len() > 8192 {
+            return;
+        } // malformed / too large headers
     }
 
     // Parse Content-Length from headers
     let header_str = String::from_utf8_lossy(&header_buf[..header_end]);
-    let content_length: usize = header_str.lines()
+    let content_length: usize = header_str
+        .lines()
         .find(|l| l.to_lowercase().starts_with("content-length:"))
         .and_then(|l| l.split(':').nth(1))
         .and_then(|v| v.trim().parse().ok())
@@ -490,7 +544,11 @@ async fn handle_connection(server: Arc<SlmServer>, mut stream: tokio::net::TcpSt
     }
 
     // Reconstruct the full request string for `handle_request`
-    let full_request = format!("{}\r\n\r\n{}", header_str.trim_end(), String::from_utf8_lossy(&body));
+    let full_request = format!(
+        "{}\r\n\r\n{}",
+        header_str.trim_end(),
+        String::from_utf8_lossy(&body)
+    );
 
     let (status, resp_body) = handle_request(&server, &full_request).await;
 
@@ -503,7 +561,9 @@ async fn handle_connection(server: Arc<SlmServer>, mut stream: tokio::net::TcpSt
          Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
          Connection: close\r\n\
          \r\n{}",
-        status, resp_body.len(), resp_body
+        status,
+        resp_body.len(),
+        resp_body
     );
     use tokio::io::AsyncWriteExt;
     let _ = stream.write_all(response.as_bytes()).await;
@@ -517,12 +577,16 @@ fn find_header_end(buf: &[u8]) -> Option<usize> {
 async fn handle_request(server: &SlmServer, raw: &str) -> (&'static str, String) {
     let first_line = raw.lines().next().unwrap_or("");
     let parts: Vec<&str> = first_line.split_whitespace().collect();
-    if parts.len() < 2 { return ("400 Bad Request", "{}".into()); }
+    if parts.len() < 2 {
+        return ("400 Bad Request", "{}".into());
+    }
     let method = parts[0];
-    let path   = parts[1];
+    let path = parts[1];
 
     // CORS preflight
-    if method == "OPTIONS" { return ("204 No Content", String::new()); }
+    if method == "OPTIONS" {
+        return ("204 No Content", String::new());
+    }
 
     match (method, path.split('?').next().unwrap_or(path)) {
         ("GET", "/health") | ("GET", "/v1/health") => {
@@ -534,7 +598,9 @@ async fn handle_request(server: &SlmServer, raw: &str) -> (&'static str, String)
         }
         ("POST", "/v1/chat/completions") => {
             // Extract body after double CRLF
-            let body_start = raw.find("\r\n\r\n").map(|i| i + 4)
+            let body_start = raw
+                .find("\r\n\r\n")
+                .map(|i| i + 4)
                 .or_else(|| raw.find("\n\n").map(|i| i + 2))
                 .unwrap_or(raw.len());
             let body_str = &raw[body_start..];
@@ -546,16 +612,23 @@ async fn handle_request(server: &SlmServer, raw: &str) -> (&'static str, String)
                         ("200 OK", json)
                     }
                     Err(e) => {
-                        let json = format!(r#"{{"error":{{"message":"{}","type":"server_error"}}}}"#, e);
+                        let json =
+                            format!(r#"{{"error":{{"message":"{}","type":"server_error"}}}}"#, e);
                         ("500 Internal Server Error", json)
                     }
                 },
                 Err(e) => {
-                    let json = format!(r#"{{"error":{{"message":"{}","type":"invalid_request_error"}}}}"#, e);
+                    let json = format!(
+                        r#"{{"error":{{"message":"{}","type":"invalid_request_error"}}}}"#,
+                        e
+                    );
                     ("400 Bad Request", json)
                 }
             }
         }
-        _ => ("404 Not Found", r#"{"error":{"message":"not found"}}"#.into()),
+        _ => (
+            "404 Not Found",
+            r#"{"error":{"message":"not found"}}"#.into(),
+        ),
     }
 }

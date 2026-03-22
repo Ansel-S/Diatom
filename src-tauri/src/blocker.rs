@@ -13,14 +13,13 @@
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
 use once_cell::sync::Lazy;
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, DNT};
+use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, DNT, HeaderMap, HeaderValue};
 use url::Url;
 
 // ── User-Agent ────────────────────────────────────────────────────────────────
 
 /// Diatom's outbound UA. Generic enough not to fingerprint the engine version.
-pub const DIATOM_UA: &str =
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
+pub const DIATOM_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
      AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15 Diatom/0.9";
 
 // ── Built-in minimal blocklist ────────────────────────────────────────────────
@@ -65,17 +64,37 @@ static BLOCKER: Lazy<AhoCorasick> = Lazy::new(|| {
 
 const STRIP_PARAMS: &[&str] = &[
     // UTM campaign parameters
-    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
-    "utm_id", "utm_source_platform",
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_term",
+    "utm_content",
+    "utm_id",
+    "utm_source_platform",
     // Platform click IDs
-    "fbclid", "gclid", "gclsrc", "dclid", "gbraid", "wbraid",
-    "msclkid", "tclid", "twclid", "ttclid",
+    "fbclid",
+    "gclid",
+    "gclsrc",
+    "dclid",
+    "gbraid",
+    "wbraid",
+    "msclkid",
+    "tclid",
+    "twclid",
+    "ttclid",
     // Email tracking
-    "mc_eid", "mc_cid",
+    "mc_eid",
+    "mc_cid",
     // Generic referrer / session tracking
-    "_ga", "_gl", "_hsenc", "_hsmi",
-    "igshid", "s_kwcid",
-    "ref", "referrer", "source",
+    "_ga",
+    "_gl",
+    "_hsenc",
+    "_hsmi",
+    "igshid",
+    "s_kwcid",
+    "ref",
+    "referrer",
+    "source",
     // Redirector patterns
     "__twitter_impression",
 ];
@@ -90,20 +109,45 @@ pub fn is_blocked(url: &str) -> bool {
 /// Returns a JS stub string for the blocked URL (cosmetic replacement),
 /// or None if no domain-specific stub is defined.
 pub fn stub_for(url: &str) -> Option<&'static str> {
-    let host = Url::parse(url).ok()
+    let host = Url::parse(url)
+        .ok()
         .and_then(|u| u.host_str().map(|h| h.to_owned()))
         .unwrap_or_default();
 
     // Domain-specific stubs prevent "X is not defined" JS errors on host pages.
     const STUBS: &[(&str, &str)] = &[
-        ("google-analytics.com",  "window.ga=function(){};window.gtag=function(){};"),
-        ("googletagmanager.com",  "window.dataLayer=window.dataLayer||[];"),
-        ("hotjar.com",            "(function(h){h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)}})(window);"),
-        ("connect.facebook.net",  "!function(f){f.fbq=function(){};f.fbq.loaded=!0;}(window);"),
-        ("amplitude.com",         "window.amplitude={getInstance:function(){return{logEvent:function(){}}}};"),
-        ("api.segment.io",        "window.analytics={track:function(){},page:function(){},identify:function(){}};"),
-        ("cdn.segment.com",       "window.analytics={track:function(){},page:function(){},identify:function(){}};"),
-        ("mixpanel.com",          "window.mixpanel={track:function(){},identify:function(){},init:function(){}};"),
+        (
+            "google-analytics.com",
+            "window.ga=function(){};window.gtag=function(){};",
+        ),
+        (
+            "googletagmanager.com",
+            "window.dataLayer=window.dataLayer||[];",
+        ),
+        (
+            "hotjar.com",
+            "(function(h){h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)}})(window);",
+        ),
+        (
+            "connect.facebook.net",
+            "!function(f){f.fbq=function(){};f.fbq.loaded=!0;}(window);",
+        ),
+        (
+            "amplitude.com",
+            "window.amplitude={getInstance:function(){return{logEvent:function(){}}}};",
+        ),
+        (
+            "api.segment.io",
+            "window.analytics={track:function(){},page:function(){},identify:function(){}};",
+        ),
+        (
+            "cdn.segment.com",
+            "window.analytics={track:function(){},page:function(){},identify:function(){}};",
+        ),
+        (
+            "mixpanel.com",
+            "window.mixpanel={track:function(){},identify:function(){},init:function(){}};",
+        ),
     ];
 
     for (pattern, stub) in STUBS {
@@ -139,7 +183,9 @@ pub fn strip_params(url: &str) -> String {
         .query_pairs()
         .filter(|(k, _)| {
             let key = k.to_lowercase();
-            !STRIP_PARAMS.iter().any(|p| key == *p || key.starts_with(&format!("{}_", p)))
+            !STRIP_PARAMS
+                .iter()
+                .any(|p| key == *p || key.starts_with(&format!("{}_", p)))
         })
         .map(|(k, v)| (k.into_owned(), v.into_owned()))
         .collect();
@@ -167,9 +213,10 @@ pub fn clean_headers(url: &str, extra_ua: Option<&str>) -> HeaderMap {
         reqwest::header::USER_AGENT,
         HeaderValue::from_str(ua).unwrap_or_else(|_| HeaderValue::from_static(DIATOM_UA)),
     );
-    headers.insert(ACCEPT, HeaderValue::from_static(
-        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    ));
+    headers.insert(
+        ACCEPT,
+        HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
+    );
     // Generic language — not locale-fingerprintable
     headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("en-US,en;q=0.9"));
     headers.insert(DNT, HeaderValue::from_static("1"));
@@ -206,7 +253,10 @@ mod tests {
     fn upgrades_http() {
         assert_eq!(upgrade_https("http://example.com/"), "https://example.com/");
         // Localhost must not be upgraded
-        assert_eq!(upgrade_https("http://localhost:3000/"), "http://localhost:3000/");
+        assert_eq!(
+            upgrade_https("http://localhost:3000/"),
+            "http://localhost:3000/"
+        );
     }
 
     #[test]

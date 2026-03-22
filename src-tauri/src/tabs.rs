@@ -32,31 +32,31 @@ pub enum SleepState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tab {
-    pub id:           String,
+    pub id: String,
     pub workspace_id: String,
-    pub url:          String,
-    pub title:        String,
-    pub sleep:        SleepState,
+    pub url: String,
+    pub title: String,
+    pub sleep: SleepState,
     /// LZ4-compressed DOM snapshot (populated during DeepSleep).
     #[serde(skip)]
-    pub zram:         Option<Vec<u8>>,
+    pub zram: Option<Vec<u8>>,
     /// Estimated memory weight (bytes). Updated on navigation and sleep.
-    pub mem_weight:   u64,
+    pub mem_weight: u64,
     /// Unix timestamp of last user activity on this tab.
-    pub last_active:  i64,
+    pub last_active: i64,
 }
 
 impl Tab {
     pub fn new(id: &str, workspace_id: &str, url: &str) -> Self {
         Tab {
-            id:           id.to_owned(),
+            id: id.to_owned(),
             workspace_id: workspace_id.to_owned(),
-            url:          url.to_owned(),
-            title:        String::new(),
-            sleep:        SleepState::Awake,
-            zram:         None,
-            mem_weight:   80 * 1024 * 1024, // default 80 MB estimate
-            last_active:  crate::db::unix_now(),
+            url: url.to_owned(),
+            title: String::new(),
+            sleep: SleepState::Awake,
+            zram: None,
+            mem_weight: 80 * 1024 * 1024, // default 80 MB estimate
+            last_active: crate::db::unix_now(),
         }
     }
 
@@ -77,8 +77,8 @@ impl Tab {
 
 #[derive(Default)]
 pub struct TabStore {
-    tabs:   HashMap<String, Tab>,
-    order:  VecDeque<String>,  // LRU: front = most recent, back = oldest
+    tabs: HashMap<String, Tab>,
+    order: VecDeque<String>, // LRU: front = most recent, back = oldest
     active: Option<String>,
 }
 
@@ -108,7 +108,9 @@ impl TabStore {
     }
 
     pub fn activate(&mut self, id: &str) {
-        if !self.tabs.contains_key(id) { return; }
+        if !self.tabs.contains_key(id) {
+            return;
+        }
         // Move to front of LRU
         self.order.retain(|i| i != id);
         self.order.push_front(id.to_owned());
@@ -137,33 +139,42 @@ impl TabStore {
             tab.mem_weight = compressed_size;
             tracing::debug!(
                 "tab {} deep-slept: {}B → {}B ({:.1}x)",
-                id, original_size, compressed_size,
+                id,
+                original_size,
+                compressed_size,
                 original_size as f64 / compressed_size.max(1) as f64
             );
         }
     }
 
     pub fn close_workspace(&mut self, workspace_id: &str) {
-        let ids: Vec<String> = self.tabs.values()
+        let ids: Vec<String> = self
+            .tabs
+            .values()
             .filter(|t| t.workspace_id == workspace_id)
             .map(|t| t.id.clone())
             .collect();
-        for id in ids { self.close(&id); }
+        for id in ids {
+            self.close(&id);
+        }
     }
 
     /// LRU candidate for automatic sleep (oldest awake tab, not the active one).
     pub fn lru_sleep_candidate(&self) -> Option<&Tab> {
-        self.order.iter().rev()
-            .filter(|id| {
-                Some(id.as_str()) != self.active.as_deref()
-            })
+        self.order
+            .iter()
+            .rev()
+            .filter(|id| Some(id.as_str()) != self.active.as_deref())
             .filter_map(|id| self.tabs.get(id))
             .find(|t| t.sleep == SleepState::Awake)
     }
 
     /// All tabs, ordered by LRU (most recent first).
     pub fn all_lru(&self) -> Vec<&Tab> {
-        self.order.iter().filter_map(|id| self.tabs.get(id)).collect()
+        self.order
+            .iter()
+            .filter_map(|id| self.tabs.get(id))
+            .collect()
     }
 
     pub fn active_id(&self) -> Option<&str> {
@@ -175,17 +186,24 @@ impl TabStore {
     }
 
     pub fn awake_count(&self) -> usize {
-        self.tabs.values().filter(|t| t.sleep == SleepState::Awake).count()
+        self.tabs
+            .values()
+            .filter(|t| t.sleep == SleepState::Awake)
+            .count()
     }
 
     /// Average memory weight of all awake tabs (bytes).
     /// Used by the tab budget formula: ω_avg.
     pub fn avg_mem_weight(&self) -> u64 {
-        let awake: Vec<u64> = self.tabs.values()
+        let awake: Vec<u64> = self
+            .tabs
+            .values()
             .filter(|t| t.sleep == SleepState::Awake)
             .map(|t| t.mem_weight)
             .collect();
-        if awake.is_empty() { return 80 * 1024 * 1024; }
+        if awake.is_empty() {
+            return 80 * 1024 * 1024;
+        }
         awake.iter().sum::<u64>() / awake.len() as u64
     }
 }
@@ -194,33 +212,37 @@ impl TabStore {
 
 #[derive(Serialize)]
 pub struct TabsState {
-    pub tabs:      Vec<TabInfo>,
+    pub tabs: Vec<TabInfo>,
     pub active_id: Option<String>,
-    pub count:     usize,
+    pub count: usize,
 }
 
 #[derive(Serialize)]
 pub struct TabInfo {
-    pub id:          String,
-    pub url:         String,
-    pub title:       String,
-    pub sleep:       SleepState,
-    pub mem_weight:  u64,
+    pub id: String,
+    pub url: String,
+    pub title: String,
+    pub sleep: SleepState,
+    pub mem_weight: u64,
     pub last_active: i64,
-    pub zram_bytes:  usize,
+    pub zram_bytes: usize,
 }
 
 impl From<&TabStore> for TabsState {
     fn from(store: &TabStore) -> Self {
-        let tabs = store.all_lru().into_iter().map(|t| TabInfo {
-            id:          t.id.clone(),
-            url:         t.url.clone(),
-            title:       t.title.clone(),
-            sleep:       t.sleep.clone(),
-            mem_weight:  t.mem_weight,
-            last_active: t.last_active,
-            zram_bytes:  t.zram_size(),
-        }).collect();
+        let tabs = store
+            .all_lru()
+            .into_iter()
+            .map(|t| TabInfo {
+                id: t.id.clone(),
+                url: t.url.clone(),
+                title: t.title.clone(),
+                sleep: t.sleep.clone(),
+                mem_weight: t.mem_weight,
+                last_active: t.last_active,
+                zram_bytes: t.zram_size(),
+            })
+            .collect();
         TabsState {
             tabs,
             active_id: store.active_id().map(|s| s.to_owned()),

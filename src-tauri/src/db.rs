@@ -8,7 +8,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::{
     path::Path,
@@ -19,7 +19,9 @@ use std::{
 
 const MIGRATIONS: &[(u32, &str)] = &[
     // ── v1: original schema ────────────────────────────────────────────────────
-    (1, "
+    (
+        1,
+        "
         CREATE TABLE IF NOT EXISTS meta (
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL
@@ -95,10 +97,12 @@ const MIGRATIONS: &[(u32, &str)] = &[
             block_count   INTEGER NOT NULL DEFAULT 0,
             noise_count   INTEGER NOT NULL DEFAULT 0
         );
-    "),
-
+    ",
+    ),
     // ── v2: Diatom v7 additions ────────────────────────────────────────────────
-    (2, "
+    (
+        2,
+        "
         -- E-WBN frozen page bundles (replaces raw snapshots for new freezes)
         CREATE TABLE IF NOT EXISTS museum_bundles (
             id            TEXT PRIMARY KEY,
@@ -157,7 +161,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
             recorded_at     INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_re_time ON reading_events(recorded_at DESC);
-    "),
+    ",
+    ),
 ];
 
 // ── Db wrapper ────────────────────────────────────────────────────────────────
@@ -167,15 +172,16 @@ pub struct Db(pub Arc<Mutex<Connection>>);
 
 impl Db {
     pub fn open(path: &Path) -> Result<Self> {
-        let conn = Connection::open(path)
-            .context("open SQLite")?;
+        let conn = Connection::open(path).context("open SQLite")?;
 
-        conn.execute_batch("
+        conn.execute_batch(
+            "
             PRAGMA journal_mode = WAL;
             PRAGMA synchronous  = NORMAL;
             PRAGMA foreign_keys = ON;
             PRAGMA mmap_size    = 268435456;  -- 256 MB
-        ")?;
+        ",
+        )?;
 
         let db = Db(Arc::new(Mutex::new(conn)));
         db.migrate()?;
@@ -201,7 +207,11 @@ impl Db {
     // ── History helpers ────────────────────────────────────────────────────────
 
     pub fn upsert_history(
-        &self, workspace_id: &str, url: &str, title: &str, dwell_ms: u64,
+        &self,
+        workspace_id: &str,
+        url: &str,
+        title: &str,
+        dwell_ms: u64,
     ) -> Result<()> {
         self.0.lock().unwrap().execute(
             "INSERT INTO history(id,workspace_id,url,title,visited_at,dwell_ms,visit_count)
@@ -217,10 +227,13 @@ impl Db {
     }
 
     pub fn search_history(
-        &self, workspace_id: &str, query: &str, limit: u32,
+        &self,
+        workspace_id: &str,
+        query: &str,
+        limit: u32,
     ) -> Result<Vec<HistoryRow>> {
-        let conn  = self.0.lock().unwrap();
-        let pat   = format!("%{query}%");
+        let conn = self.0.lock().unwrap();
+        let pat = format!("%{query}%");
         let mut stmt = conn.prepare(
             "SELECT id,url,title,visited_at,dwell_ms,visit_count
              FROM history
@@ -229,24 +242,32 @@ impl Db {
         )?;
         let rows = stmt.query_map(params![workspace_id, pat, limit], |r| {
             Ok(HistoryRow {
-                id: r.get(0)?, url: r.get(1)?, title: r.get(2)?,
-                visited_at: r.get(3)?, dwell_ms: r.get(4)?, visit_count: r.get(5)?,
+                id: r.get(0)?,
+                url: r.get(1)?,
+                title: r.get(2)?,
+                visited_at: r.get(3)?,
+                dwell_ms: r.get(4)?,
+                visit_count: r.get(5)?,
             })
         })?;
-        rows.collect::<rusqlite::Result<_>>().context("search_history")
+        rows.collect::<rusqlite::Result<_>>()
+            .context("search_history")
     }
 
     pub fn clear_history(&self, workspace_id: &str) -> Result<()> {
-        self.0.lock().unwrap().execute(
-            "DELETE FROM history WHERE workspace_id=?1", [workspace_id],
-        )?;
+        self.0
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM history WHERE workspace_id=?1", [workspace_id])?;
         Ok(())
     }
 
     // ── Settings helpers ───────────────────────────────────────────────────────
 
     pub fn get_setting(&self, key: &str) -> Option<String> {
-        self.0.lock().unwrap()
+        self.0
+            .lock()
+            .unwrap()
             .query_row("SELECT value FROM meta WHERE key=?1", [key], |r| r.get(0))
             .ok()
     }
@@ -295,17 +316,21 @@ impl Db {
     }
 
     pub fn war_report_week(&self, week_start: i64) -> Result<WarReportRow> {
-        self.0.lock().unwrap()
+        self.0
+            .lock()
+            .unwrap()
             .query_row(
                 "SELECT tracking_block_count,fingerprint_noise_count,ram_saved_mb,time_saved_min
                  FROM privacy_stats WHERE week_start=?1",
                 [week_start],
-                |r| Ok(WarReportRow {
-                    tracking_block_count:   r.get(0)?,
-                    fingerprint_noise_count: r.get(1)?,
-                    ram_saved_mb:           r.get(2)?,
-                    time_saved_min:         r.get(3)?,
-                }),
+                |r| {
+                    Ok(WarReportRow {
+                        tracking_block_count: r.get(0)?,
+                        fingerprint_noise_count: r.get(1)?,
+                        ram_saved_mb: r.get(2)?,
+                        time_saved_min: r.get(3)?,
+                    })
+                },
             )
             .context("war_report_week")
     }
@@ -318,9 +343,14 @@ impl Db {
              (id,url,domain,dwell_ms,scroll_px_s,reading_mode,tab_switches,recorded_at)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
             params![
-                evt.id, evt.url, evt.domain, evt.dwell_ms,
-                evt.scroll_px_s, evt.reading_mode as i32,
-                evt.tab_switches, evt.recorded_at,
+                evt.id,
+                evt.url,
+                evt.domain,
+                evt.dwell_ms,
+                evt.scroll_px_s,
+                evt.reading_mode as i32,
+                evt.tab_switches,
+                evt.recorded_at,
             ],
         )?;
         // Enforce 1000-row ring buffer
@@ -334,29 +364,31 @@ impl Db {
     }
 
     pub fn reading_events_since(&self, since_unix: i64) -> Result<Vec<ReadingEvent>> {
-        let conn  = self.0.lock().unwrap();
+        let conn = self.0.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id,url,domain,dwell_ms,scroll_px_s,reading_mode,tab_switches,recorded_at
              FROM reading_events WHERE recorded_at >= ?1 ORDER BY recorded_at DESC",
         )?;
         let rows = stmt.query_map([since_unix], |r| {
             Ok(ReadingEvent {
-                id:           r.get(0)?,
-                url:          r.get(1)?,
-                domain:       r.get(2)?,
-                dwell_ms:     r.get(3)?,
-                scroll_px_s:  r.get(4)?,
-                reading_mode: r.get::<_,i32>(5)? != 0,
+                id: r.get(0)?,
+                url: r.get(1)?,
+                domain: r.get(2)?,
+                dwell_ms: r.get(3)?,
+                scroll_px_s: r.get(4)?,
+                reading_mode: r.get::<_, i32>(5)? != 0,
                 tab_switches: r.get(6)?,
-                recorded_at:  r.get(7)?,
+                recorded_at: r.get(7)?,
             })
         })?;
-        rows.collect::<rusqlite::Result<_>>().context("reading_events_since")
+        rows.collect::<rusqlite::Result<_>>()
+            .context("reading_events_since")
     }
 
     pub fn purge_reading_events_before(&self, before_unix: i64) -> Result<usize> {
         let n = self.0.lock().unwrap().execute(
-            "DELETE FROM reading_events WHERE recorded_at < ?1", [before_unix],
+            "DELETE FROM reading_events WHERE recorded_at < ?1",
+            [before_unix],
         )?;
         Ok(n)
     }
@@ -369,8 +401,15 @@ impl Db {
              (id,url,title,content_hash,bundle_path,tfidf_tags,bundle_size,frozen_at,workspace_id)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
             params![
-                b.id, b.url, b.title, b.content_hash, b.bundle_path,
-                b.tfidf_tags, b.bundle_size, b.frozen_at, b.workspace_id,
+                b.id,
+                b.url,
+                b.title,
+                b.content_hash,
+                b.bundle_path,
+                b.tfidf_tags,
+                b.bundle_size,
+                b.frozen_at,
+                b.workspace_id,
             ],
         )?;
         Ok(())
@@ -384,13 +423,19 @@ impl Db {
         )?;
         let rows = stmt.query_map(params![workspace_id, limit], |r| {
             Ok(BundleRow {
-                id: r.get(0)?, url: r.get(1)?, title: r.get(2)?,
-                content_hash: r.get(3)?, bundle_path: r.get(4)?,
-                tfidf_tags: r.get(5)?, bundle_size: r.get(6)?,
-                frozen_at: r.get(7)?, workspace_id: r.get(8)?,
+                id: r.get(0)?,
+                url: r.get(1)?,
+                title: r.get(2)?,
+                content_hash: r.get(3)?,
+                bundle_path: r.get(4)?,
+                tfidf_tags: r.get(5)?,
+                bundle_size: r.get(6)?,
+                frozen_at: r.get(7)?,
+                workspace_id: r.get(8)?,
             })
         })?;
-        rows.collect::<rusqlite::Result<_>>().context("list_bundles")
+        rows.collect::<rusqlite::Result<_>>()
+            .context("list_bundles")
     }
 
     pub fn search_bundles_fts(&self, query: &str, workspace_id: &str) -> Result<Vec<BundleRow>> {
@@ -406,17 +451,26 @@ impl Db {
         )?;
         let rows = stmt.query_map(params![query, workspace_id], |r| {
             Ok(BundleRow {
-                id: r.get(0)?, url: r.get(1)?, title: r.get(2)?,
-                content_hash: r.get(3)?, bundle_path: r.get(4)?,
-                tfidf_tags: r.get(5)?, bundle_size: r.get(6)?,
-                frozen_at: r.get(7)?, workspace_id: r.get(8)?,
+                id: r.get(0)?,
+                url: r.get(1)?,
+                title: r.get(2)?,
+                content_hash: r.get(3)?,
+                bundle_path: r.get(4)?,
+                tfidf_tags: r.get(5)?,
+                bundle_size: r.get(6)?,
+                frozen_at: r.get(7)?,
+                workspace_id: r.get(8)?,
             })
         })?;
-        rows.collect::<rusqlite::Result<_>>().context("search_bundles_fts")
+        rows.collect::<rusqlite::Result<_>>()
+            .context("search_bundles_fts")
     }
 
     pub fn delete_bundle(&self, id: &str) -> Result<()> {
-        self.0.lock().unwrap().execute("DELETE FROM museum_bundles WHERE id=?1", [id])?;
+        self.0
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM museum_bundles WHERE id=?1", [id])?;
         Ok(())
     }
 
@@ -433,17 +487,25 @@ impl Db {
 
     pub fn dom_blocks_for(&self, domain: &str) -> Result<Vec<DomBlock>> {
         let conn = self.0.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id,domain,selector,created_at FROM dom_blocks WHERE domain=?1",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT id,domain,selector,created_at FROM dom_blocks WHERE domain=?1")?;
         let rows = stmt.query_map([domain], |r| {
-            Ok(DomBlock { id: r.get(0)?, domain: r.get(1)?, selector: r.get(2)?, created_at: r.get(3)? })
+            Ok(DomBlock {
+                id: r.get(0)?,
+                domain: r.get(1)?,
+                selector: r.get(2)?,
+                created_at: r.get(3)?,
+            })
         })?;
-        rows.collect::<rusqlite::Result<_>>().context("dom_blocks_for")
+        rows.collect::<rusqlite::Result<_>>()
+            .context("dom_blocks_for")
     }
 
     pub fn delete_dom_block(&self, id: &str) -> Result<()> {
-        self.0.lock().unwrap().execute("DELETE FROM dom_blocks WHERE id=?1", [id])?;
+        self.0
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM dom_blocks WHERE id=?1", [id])?;
         Ok(())
     }
 
@@ -451,7 +513,8 @@ impl Db {
         let conn = self.0.lock().unwrap();
         let mut stmt = conn.prepare("SELECT DISTINCT domain FROM dom_blocks ORDER BY domain")?;
         let rows = stmt.query_map([], |r| r.get(0))?;
-        rows.collect::<rusqlite::Result<_>>().context("all_dom_block_domains")
+        rows.collect::<rusqlite::Result<_>>()
+            .context("all_dom_block_domains")
     }
 
     // ── Knowledge packs ────────────────────────────────────────────────────────
@@ -472,12 +535,17 @@ impl Db {
         )?;
         let rows = stmt.query_map([], |r| {
             Ok(KnowledgePack {
-                id: r.get(0)?, name: r.get(1)?, format: r.get(2)?,
-                pack_path: r.get(3)?, size_bytes: r.get(4)?,
-                added_at: r.get(5)?, enabled: r.get::<_,i32>(6)? != 0,
+                id: r.get(0)?,
+                name: r.get(1)?,
+                format: r.get(2)?,
+                pack_path: r.get(3)?,
+                size_bytes: r.get(4)?,
+                added_at: r.get(5)?,
+                enabled: r.get::<_, i32>(6)? != 0,
             })
         })?;
-        rows.collect::<rusqlite::Result<_>>().context("list_knowledge_packs")
+        rows.collect::<rusqlite::Result<_>>()
+            .context("list_knowledge_packs")
     }
 }
 
@@ -485,69 +553,71 @@ impl Db {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryRow {
-    pub id:          String,
-    pub url:         String,
-    pub title:       String,
-    pub visited_at:  i64,
-    pub dwell_ms:    i64,
+    pub id: String,
+    pub url: String,
+    pub title: String,
+    pub visited_at: i64,
+    pub dwell_ms: i64,
     pub visit_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WarReportRow {
-    pub tracking_block_count:    i64,
+    pub tracking_block_count: i64,
     pub fingerprint_noise_count: i64,
-    pub ram_saved_mb:            f64,
-    pub time_saved_min:          f64,
+    pub ram_saved_mb: f64,
+    pub time_saved_min: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReadingEvent {
-    pub id:           String,
-    pub url:          String,
-    pub domain:       String,
-    pub dwell_ms:     i64,
-    pub scroll_px_s:  f64,
+    pub id: String,
+    pub url: String,
+    pub domain: String,
+    pub dwell_ms: i64,
+    pub scroll_px_s: f64,
     pub reading_mode: bool,
     pub tab_switches: i64,
-    pub recorded_at:  i64,
+    pub recorded_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BundleRow {
-    pub id:           String,
-    pub url:          String,
-    pub title:        String,
+    pub id: String,
+    pub url: String,
+    pub title: String,
     pub content_hash: String,
-    pub bundle_path:  String,
-    pub tfidf_tags:   String,  // JSON array
-    pub bundle_size:  i64,
-    pub frozen_at:    i64,
+    pub bundle_path: String,
+    pub tfidf_tags: String, // JSON array
+    pub bundle_size: i64,
+    pub frozen_at: i64,
     pub workspace_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DomBlock {
-    pub id:         String,
-    pub domain:     String,
-    pub selector:   String,
+    pub id: String,
+    pub domain: String,
+    pub selector: String,
     pub created_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KnowledgePack {
-    pub id:         String,
-    pub name:       String,
-    pub format:     String,  // "docset" | "zim"
-    pub pack_path:  String,
+    pub id: String,
+    pub name: String,
+    pub format: String, // "docset" | "zim"
+    pub pack_path: String,
     pub size_bytes: i64,
-    pub added_at:   i64,
-    pub enabled:    bool,
+    pub added_at: i64,
+    pub enabled: bool,
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
-pub fn new_id() -> String { uuid::Uuid::new_v4().to_string() }
+pub fn new_id() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
 
 pub fn unix_now() -> i64 {
     std::time::SystemTime::now()
@@ -591,7 +661,7 @@ mod week_start_tests {
     #[test]
     fn consecutive_weeks_are_7_days_apart() {
         let ts1: i64 = 20528 * 86_400 + 3 * 86_400; // Wednesday
-        let ts2: i64 = ts1 + 7 * 86_400;             // next Wednesday
+        let ts2: i64 = ts1 + 7 * 86_400; // next Wednesday
         assert_eq!(week_start(ts2) - week_start(ts1), 7 * 86_400);
     }
 }

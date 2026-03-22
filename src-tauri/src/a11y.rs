@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // diatom/src-tauri/src/a11y.rs  — v7.2  RED-2
 //
-// Accessibility Layer — 道德底线，不可妥协
+// Accessibility Layer
 //
 // Problem: Servo's accessibility tree support lags Chromium.
 //          For screen reader users (NVDA/JAWS/VoiceOver), Diatom is
@@ -46,23 +46,83 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize)]
 pub struct AriaRule {
     pub selector: &'static str,
-    pub role:     Option<&'static str>,
-    pub label:    Option<&'static str>,
-    pub live:     Option<&'static str>,  // "polite" | "assertive" | "off"
+    pub role: Option<&'static str>,
+    pub label: Option<&'static str>,
+    pub live: Option<&'static str>, // "polite" | "assertive" | "off"
     pub expanded: Option<bool>,
 }
 
 pub const CHROME_ARIA_RULES: &[AriaRule] = &[
-    AriaRule { selector: "#omnibox",        role: Some("combobox"),    label: Some("地址栏与搜索"),        live: None,         expanded: Some(false) },
-    AriaRule { selector: "#tab-bar",        role: Some("tablist"),     label: Some("标签页列表"),          live: None,         expanded: None },
-    AriaRule { selector: ".tab-btn",        role: Some("tab"),         label: None,                        live: None,         expanded: None },
-    AriaRule { selector: ".tab-btn.active", role: Some("tab"),         label: None,                        live: None,         expanded: None },
-    AriaRule { selector: "#notes-zone",     role: Some("region"),      label: Some("草稿与回声提示区"),    live: Some("polite"),expanded: None },
-    AriaRule { selector: "#ai-panel",       role: Some("dialog"),      label: Some("AI 对话面板"),         live: Some("polite"),expanded: None },
-    AriaRule { selector: ".echo-panel",     role: Some("dialog"),      label: Some("Diatom 回声面板"),     live: None,         expanded: None },
-    AriaRule { selector: "#vc-badge",       role: Some("status"),      label: Some("视频播放速度"),        live: Some("polite"),expanded: None },
-    AriaRule { selector: "#index-progress", role: Some("progressbar"), label: Some("档案馆索引进度"),      live: Some("polite"),expanded: None },
-    AriaRule { selector: ".devnet-panel",   role: Some("log"),         label: Some("网络请求日志"),        live: Some("off"),  expanded: None },
+    AriaRule {
+        selector: "#omnibox",
+        role: Some("combobox"),
+        label: Some("地址栏与搜索"),
+        live: None,
+        expanded: Some(false),
+    },
+    AriaRule {
+        selector: "#tab-bar",
+        role: Some("tablist"),
+        label: Some("标签页列表"),
+        live: None,
+        expanded: None,
+    },
+    AriaRule {
+        selector: ".tab-btn",
+        role: Some("tab"),
+        label: None,
+        live: None,
+        expanded: None,
+    },
+    AriaRule {
+        selector: ".tab-btn.active",
+        role: Some("tab"),
+        label: None,
+        live: None,
+        expanded: None,
+    },
+    AriaRule {
+        selector: "#notes-zone",
+        role: Some("region"),
+        label: Some("草稿与回声提示区"),
+        live: Some("polite"),
+        expanded: None,
+    },
+    AriaRule {
+        selector: "#ai-panel",
+        role: Some("dialog"),
+        label: Some("AI 对话面板"),
+        live: Some("polite"),
+        expanded: None,
+    },
+    AriaRule {
+        selector: ".echo-panel",
+        role: Some("dialog"),
+        label: Some("Diatom 回声面板"),
+        live: None,
+        expanded: None,
+    },
+    AriaRule {
+        selector: "#vc-badge",
+        role: Some("status"),
+        label: Some("视频播放速度"),
+        live: Some("polite"),
+        expanded: None,
+    },
+    AriaRule {
+        selector: "#index-progress",
+        role: Some("progressbar"),
+        label: Some("档案馆索引进度"),
+        live: Some("polite"),
+        expanded: None,
+    },
+    AriaRule {
+        selector: ".devnet-panel",
+        role: Some("log"),
+        label: Some("网络请求日志"),
+        live: Some("off"),
+        expanded: None,
+    },
 ];
 
 /// Generate the JS snippet that applies ARIA rules to the chrome DOM.
@@ -82,21 +142,30 @@ pub fn generate_aria_injection_script() -> String {
     parts.push("  }".to_owned());
 
     for rule in CHROME_ARIA_RULES {
-        let role     = rule.role.map(|r| format!("'{r}'")).unwrap_or("null".into());
-        let label    = rule.label.map(|l| format!("'{l}'")).unwrap_or("null".into());
-        let live     = rule.live.map(|v| format!("'{v}'")).unwrap_or("null".into());
+        let role = rule.role.map(|r| format!("'{r}'")).unwrap_or("null".into());
+        let label = rule
+            .label
+            .map(|l| format!("'{l}'"))
+            .unwrap_or("null".into());
+        let live = rule.live.map(|v| format!("'{v}'")).unwrap_or("null".into());
         let expanded = match rule.expanded {
-            Some(true)  => "true".to_owned(),
+            Some(true) => "true".to_owned(),
             Some(false) => "false".to_owned(),
-            None        => "null".to_owned(),
+            None => "null".to_owned(),
         };
-        parts.push(format!("  apply('{}', {}, {}, {}, {});",
-            rule.selector, role, label, live, expanded));
+        parts.push(format!(
+            "  apply('{}', {}, {}, {}, {});",
+            rule.selector, role, label, live, expanded
+        ));
     }
 
     // Tab navigation: ensure every interactive element has tabindex
-    parts.push("  document.querySelectorAll('.tab-btn,.tab-close,[data-action]').forEach((el,i) => {".to_owned());
-    parts.push("    if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');".to_owned());
+    parts.push(
+        "  document.querySelectorAll('.tab-btn,.tab-close,[data-action]').forEach((el,i) => {"
+            .to_owned(),
+    );
+    parts
+        .push("    if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');".to_owned());
     parts.push("  });".to_owned());
 
     // Announce tab switches to screen readers via aria-live region

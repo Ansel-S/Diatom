@@ -22,13 +22,13 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeatureLegal {
-    pub id:                &'static str,
-    pub display_name:      &'static str,
-    pub legal_class:       &'static str,   // how we frame it in law
-    pub requires_consent:  bool,
-    pub consent_text:      &'static str,   // shown to user before activation
-    pub controls:          &'static [&'static str],
-    pub residual_risk:     &'static str,
+    pub id: &'static str,
+    pub display_name: &'static str,
+    pub legal_class: &'static str, // how we frame it in law
+    pub requires_consent: bool,
+    pub consent_text: &'static str, // shown to user before activation
+    pub controls: &'static [&'static str],
+    pub residual_risk: &'static str,
 }
 
 /// All features with non-trivial legal surface area.
@@ -52,7 +52,6 @@ pub static FEATURE_LEGAL_REGISTRY: &[FeatureLegal] = &[
         residual_risk: "Some jurisdictions may still classify as unwanted automated access. \
                         Users in the EU/UK should consult local counsel before enabling.",
     },
-
     FeatureLegal {
         id: "dom_crusher",
         display_name: "DOM Crusher（元素永久屏蔽）",
@@ -70,7 +69,6 @@ pub static FEATURE_LEGAL_REGISTRY: &[FeatureLegal] = &[
         residual_risk: "Some site ToS prohibit ad-blocking. Diatom does not screen ToS; \
                         users are responsible for compliance with site-specific terms.",
     },
-
     FeatureLegal {
         id: "ghost_redirect",
         display_name: "Ghost Redirect（离线语义回退）",
@@ -90,7 +88,6 @@ pub static FEATURE_LEGAL_REGISTRY: &[FeatureLegal] = &[
                         content at freeze time. Users are responsible for compliance with \
                         applicable copyright law when freezing pages.",
     },
-
     FeatureLegal {
         id: "echo_analysis",
         display_name: "The Echo（人格演化回声）",
@@ -114,7 +111,6 @@ pub static FEATURE_LEGAL_REGISTRY: &[FeatureLegal] = &[
                         has no backend) likely removes the Article 22 automated-decision concern, \
                         but users in highly regulated jurisdictions should verify.",
     },
-
     FeatureLegal {
         id: "mesh_sync",
         display_name: "Diatom Mesh（局域网同步）",
@@ -139,11 +135,14 @@ pub static FEATURE_LEGAL_REGISTRY: &[FeatureLegal] = &[
 /// Check whether the user has consented to a feature that requires it.
 /// Returns Err with the consent text if consent is not yet recorded.
 pub fn check_consent(feature_id: &str, db: &crate::db::Db) -> Result<(), String> {
-    let feature = FEATURE_LEGAL_REGISTRY.iter()
-        .find(|f| f.id == feature_id);
+    let feature = FEATURE_LEGAL_REGISTRY.iter().find(|f| f.id == feature_id);
 
-    let Some(f) = feature else { return Ok(()); };
-    if !f.requires_consent { return Ok(()); }
+    let Some(f) = feature else {
+        return Ok(());
+    };
+    if !f.requires_consent {
+        return Ok(());
+    }
 
     let key = format!("consent:{}", feature_id);
     if db.get_setting(&key).as_deref() == Some("true") {
@@ -178,8 +177,11 @@ mod tests {
     fn all_consent_features_have_text() {
         for f in FEATURE_LEGAL_REGISTRY {
             if f.requires_consent {
-                assert!(!f.consent_text.is_empty(),
-                    "Feature '{}' requires consent but has no consent text", f.id);
+                assert!(
+                    !f.consent_text.is_empty(),
+                    "Feature '{}' requires consent but has no consent text",
+                    f.id
+                );
             }
         }
     }
@@ -187,8 +189,11 @@ mod tests {
     #[test]
     fn all_features_have_controls() {
         for f in FEATURE_LEGAL_REGISTRY {
-            assert!(!f.controls.is_empty(),
-                "Feature '{}' has no compliance controls listed", f.id);
+            assert!(
+                !f.controls.is_empty(),
+                "Feature '{}' has no compliance controls listed",
+                f.id
+            );
         }
     }
 }

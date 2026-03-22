@@ -6,7 +6,7 @@
 // "totp_entries_<id>". The master key from freeze.rs is used for encryption.
 // ─────────────────────────────────────────────────────────────────────────────
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use base32::Alphabet;
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
@@ -19,23 +19,23 @@ type HmacSha1 = Hmac<Sha1>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TotpEntry {
-    pub id:       String,
-    pub issuer:   String,
-    pub account:  String,
+    pub id: String,
+    pub issuer: String,
+    pub account: String,
     /// Base32-encoded TOTP secret.
-    pub secret:   String,
+    pub secret: String,
     /// Domains that auto-trigger this entry when focused.
-    pub domains:  Vec<String>,
+    pub domains: Vec<String>,
     pub added_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TotpCode {
-    pub entry_id:    String,
-    pub issuer:      String,
-    pub account:     String,
-    pub code:        String,
-    pub valid_until: i64,   // Unix timestamp when this 30s window ends
+    pub entry_id: String,
+    pub issuer: String,
+    pub account: String,
+    pub code: String,
+    pub valid_until: i64, // Unix timestamp when this 30s window ends
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -82,22 +82,25 @@ impl TotpStore {
     }
 
     pub fn generate(&self, id: &str) -> Result<TotpCode> {
-        let entry = self.entries.get(id)
+        let entry = self
+            .entries
+            .get(id)
             .ok_or_else(|| anyhow::anyhow!("TOTP entry {id} not found"))?;
         let code = totp_now(&entry.secret)?;
         let now = crate::db::unix_now();
         let valid_until = (now / 30 + 1) * 30;
         Ok(TotpCode {
-            entry_id:    id.to_owned(),
-            issuer:      entry.issuer.clone(),
-            account:     entry.account.clone(),
+            entry_id: id.to_owned(),
+            issuer: entry.issuer.clone(),
+            account: entry.account.clone(),
             code,
             valid_until,
         })
     }
 
     pub fn match_domain(&self, domain: &str) -> Vec<TotpCode> {
-        self.entries.values()
+        self.entries
+            .values()
             .filter(|e| e.domains.iter().any(|d| domain.ends_with(d.as_str())))
             .filter_map(|e| self.generate(&e.id).ok())
             .collect()
@@ -118,8 +121,8 @@ pub fn totp_now(secret_b32: &str) -> Result<String> {
 
 /// RFC 4226 HOTP — 6-digit truncated HMAC-SHA1.
 fn hotp(key: &[u8], counter: u64) -> Result<String> {
-    let mut mac = HmacSha1::new_from_slice(key)
-        .map_err(|_| anyhow::anyhow!("invalid HMAC key length"))?;
+    let mut mac =
+        HmacSha1::new_from_slice(key).map_err(|_| anyhow::anyhow!("invalid HMAC key length"))?;
     mac.update(&counter.to_be_bytes());
     let result = mac.finalize().into_bytes();
 
@@ -151,7 +154,9 @@ mod tests {
     fn store_add_and_generate() {
         let mut store = TotpStore::default();
         // Standard test secret: JBSWY3DPEHPK3PXP
-        let entry = store.add("Test", "user@example.com", "JBSWY3DPEHPK3PXP", vec![]).unwrap();
+        let entry = store
+            .add("Test", "user@example.com", "JBSWY3DPEHPK3PXP", vec![])
+            .unwrap();
         assert_eq!(entry.issuer, "Test");
         let code = store.generate(&entry.id).unwrap();
         assert_eq!(code.code.len(), 6);

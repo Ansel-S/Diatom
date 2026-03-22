@@ -45,7 +45,7 @@ async fn is_allowed(url: &str) -> bool {
         Err(_) => return false,
     };
     let origin = format!("{}://{}", parsed.scheme(), parsed.host_str().unwrap_or(""));
-    let path   = parsed.path();
+    let path = parsed.path();
 
     // Check cache
     {
@@ -59,14 +59,16 @@ async fn is_allowed(url: &str) -> bool {
     let robots_url = format!("{}/robots.txt", origin);
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
-        .build() {
+        .build()
+    {
         Ok(c) => c,
-        Err(_) => return true,  // fail open
+        Err(_) => return true, // fail open
     };
     let text = match client
         .get(&robots_url)
         .header("User-Agent", crate::blocker::DIATOM_UA)
-        .send().await
+        .send()
+        .await
         .and_then(|r| futures::executor::block_on(r.text()))
     {
         Ok(t) => t,
@@ -82,20 +84,28 @@ async fn is_allowed(url: &str) -> bool {
     let mut in_scope = false;
     for line in text.lines() {
         let line = line.trim();
-        if line.starts_with('#') || line.is_empty() { continue; }
+        if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
         if let Some(agent) = line.strip_prefix("User-agent:") {
             let agent = agent.trim();
             in_scope = agent == "*" || agent.to_lowercase().contains("diatom");
         } else if in_scope {
             if let Some(path) = line.strip_prefix("Disallow:") {
                 let p = path.trim().to_owned();
-                if !p.is_empty() { disallowed.push(p); }
+                if !p.is_empty() {
+                    disallowed.push(p);
+                }
             }
         }
     }
 
     let allowed = !disallowed.iter().any(|p| path.starts_with(p.as_str()));
-    ROBOTS_CACHE.lock().unwrap().entries.insert(origin, disallowed);
+    ROBOTS_CACHE
+        .lock()
+        .unwrap()
+        .entries
+        .insert(origin, disallowed);
     allowed
 }
 
@@ -106,7 +116,14 @@ struct RateLimiter {
     session_domains: Vec<String>,
 }
 
-impl Default for RateLimiter { fn default() -> Self { Self { last_request: HashMap::new(), session_domains: Vec::new() } } }
+impl Default for RateLimiter {
+    fn default() -> Self {
+        Self {
+            last_request: HashMap::new(),
+            session_domains: Vec::new(),
+        }
+    }
+}
 
 static RATE_LIMITER: Lazy<Mutex<RateLimiter>> = Lazy::new(Default::default);
 
@@ -117,12 +134,16 @@ fn check_rate(domain: &str) -> bool {
     let mut rl = RATE_LIMITER.lock().unwrap();
     // Max 3 unique domains per session
     if !rl.session_domains.contains(&domain.to_owned()) {
-        if rl.session_domains.len() >= MAX_SESSION_DOMAINS { return false; }
+        if rl.session_domains.len() >= MAX_SESSION_DOMAINS {
+            return false;
+        }
         rl.session_domains.push(domain.to_owned());
     }
     // Min 8s between requests to same domain
     if let Some(last) = rl.last_request.get(domain) {
-        if last.elapsed().as_secs() < MIN_INTERVAL_SECS { return false; }
+        if last.elapsed().as_secs() < MIN_INTERVAL_SECS {
+            return false;
+        }
     }
     rl.last_request.insert(domain.to_owned(), Instant::now());
     true
@@ -133,18 +154,32 @@ fn check_rate(domain: &str) -> bool {
 /// Public-domain, high-traffic domains appropriate for noise requests.
 /// Never use commercial, private, or paywalled domains.
 static NOISE_DOMAINS: &[&str] = &[
-    "en.wikipedia.org", "commons.wikimedia.org", "www.gutenberg.org",
-    "archive.org", "scholar.google.com", "www.semanticscholar.org",
-    "news.ycombinator.com", "lobste.rs", "www.reddit.com",
-    "stackoverflow.com", "github.com", "gitlab.com",
+    "en.wikipedia.org",
+    "commons.wikimedia.org",
+    "www.gutenberg.org",
+    "archive.org",
+    "scholar.google.com",
+    "www.semanticscholar.org",
+    "news.ycombinator.com",
+    "lobste.rs",
+    "www.reddit.com",
+    "stackoverflow.com",
+    "github.com",
+    "gitlab.com",
 ];
 
 /// Generate a plausible random path for a domain using its known URL patterns.
 fn random_path_for(domain: &str, rng: &mut impl Rng) -> String {
     match domain {
         "en.wikipedia.org" => {
-            let topics = ["Diatom", "Rust_(programming_language)", "Privacy",
-                "Cryptography", "Fourier_transform", "Information_theory"];
+            let topics = [
+                "Diatom",
+                "Rust_(programming_language)",
+                "Privacy",
+                "Cryptography",
+                "Fourier_transform",
+                "Information_theory",
+            ];
             format!("/wiki/{}", topics.choose(rng).unwrap())
         }
         "news.ycombinator.com" => {
@@ -156,7 +191,13 @@ fn random_path_for(domain: &str, rng: &mut impl Rng) -> String {
             format!("/questions/{}/q", qids.choose(rng).unwrap())
         }
         "github.com" => {
-            let paths = ["explore", "trending", "topics/rust", "topics/privacy", "topics/wasm"];
+            let paths = [
+                "explore",
+                "trending",
+                "topics/rust",
+                "topics/privacy",
+                "topics/wasm",
+            ];
             format!("/{}", paths.choose(rng).unwrap())
         }
         _ => "/".to_owned(),
@@ -171,13 +212,17 @@ pub async fn fire_noise_request(db: &crate::db::Db) -> Option<String> {
     let mut rng = rand::thread_rng();
 
     let domain = NOISE_DOMAINS.choose(&mut rng)?;
-    if !check_rate(domain) { return None; }
+    if !check_rate(domain) {
+        return None;
+    }
 
     let path = random_path_for(domain, &mut rng);
-    let url  = format!("https://{}{}", domain, path);
+    let url = format!("https://{}{}", domain, path);
 
     // robots.txt compliance check
-    if !is_allowed(&url).await { return None; }
+    if !is_allowed(&url).await {
+        return None;
+    }
 
     // Variable human-like delay: 1–4 s
     let delay_ms = rng.gen_range(1_000..4_000);
@@ -186,14 +231,16 @@ pub async fn fire_noise_request(db: &crate::db::Db) -> Option<String> {
     // Fire the request (GET only, no body, clean headers, no cookies)
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
-        .build().ok()?;
+        .build()
+        .ok()?;
 
     let result = client
         .get(&url)
         .header("User-Agent", crate::blocker::DIATOM_UA)
         .header("DNT", "1")
         .header("Sec-GPC", "1")
-        .send().await;
+        .send()
+        .await;
 
     match result {
         Ok(resp) if resp.status().is_success() => {
