@@ -1,1 +1,227 @@
+/**
+ * diatom/src/browser/compat.js  — v7.2  RED-1
+ *
+ * Compatibility Router frontend.
+ *
+ * Responsibilities:
+ *   1. Monitor page health after load (JS errors, blank body, DOM storms)
+ *   2. If broken detected → inject compat hint banner
+ *   3. Handle system browser handoff via Tauri shell plugin
+ *   4. Pre-emptively warn on known payment/banking domains
+ *   5. Route diatom://about to the about page
+ *
+ * Philosophy: Diatom never silently falls back to Blink.
+ *   It always tells the user what happened and lets them decide.
+ *   "向上靠不等于放弃用户。"
+ */
 
+'use strict';
+
+import { invoke } from './ipc.js';
+import { domainOf } from './utils.js';
+
+// ── Health monitor ────────────────────────────────────────────────────────────
+
+let _jsErrors    = 0;
+let _consoleErrs = 0;
+let _monitorUrl  = '';
+let _monitorTimer = null;
+
+/**
+ * Start monitoring the current page for compatibility issues.
+ * Called by tabs.js on every navigation.
+ */
+export function startHealthMonitor(url) {
+  _jsErrors    = 0;
+  _consoleErrs = 0;
+  _monitorUrl  = url;
+  clearTimeout(_monitorTimer);
+
+  // Count uncaught JS errors
+  window.addEventListener('error', onJsError, { capture: true, once: false });
+
+  // Check for blank body after 3s
+  _monitorTimer = setTimeout(() => checkPageHealth(url), 3000);
+}
+
+function onJsError() { _jsErrors++; }
+
+async function checkPageHealth(url) {
+  const domain    = domainOf(url);
+  const blankBody = !document.body?.innerText?.trim().length;
+  const report    = {
+    url,
+    js_errors:          _jsErrors,
+    dom_mutation_storm: false,   // TODO: wire MutationObserver count
+    blank_body:         blankBody,
+    console_errors:     _consoleErrs,
+  };
+
+  // Ask Rust whether this domain is marked as legacy
+  let isLegacy = false;
+  try {
+    isLegacy = await invoke('cmd_compat_is_legacy', { domain });
+  } catch { /* non-critical */ }
+
+  const appearsBroken = blankBody
+    || _jsErrors >= 5
+    || (_jsErrors >= 2 && _consoleErrs >= 10);
+
+  if (isLegacy || appearsBroken) {
+    // Report to Rust for domain tracking
+    try {
+      await invoke('cmd_compat_page_report', { report });
+    } catch { /* non-critical */ }
+
+    injectCompatBanner(domain);
+  }
+
+  // Payment domain pre-emptive warning
+  try {
+    const isPayment = await invoke('cmd_compat_is_payment', { domain });
+    if (isPayment) injectPaymentWarning(domain);
+  } catch { /* non-critical */ }
+}
+
+// ── Compat banner ─────────────────────────────────────────────────────────────
+
+let _bannerShown = false;
+
+function injectCompatBanner(domain) {
+  if (_bannerShown || document.getElementById('__diatom_compat')) return;
+  _bannerShown = true;
+
+  const bar = document.createElement('div');
+  bar.id = '__diatom_compat';
+  bar.setAttribute('role', 'alert');
+  bar.setAttribute('aria-live', 'assertive');
+  bar.style.cssText = `
+    position:fixed; top:0; left:0; right:0; z-index:2147483647;
+    background:#1e293b; border-bottom:1px solid rgba(245,158,11,.25);
+    color:#fbbf24; font:500 12px/1.5 'Inter',system-ui;
+    padding:7px 12px; display:flex; align-items:center; gap:8px;
+  `;
+
+  const msg = document.createElement('span');
+  msg.textContent = `⚠ Diatom 检测到此页面可能存在兼容性问题`;
+
+  const openBtn = document.createElement('button');
+  openBtn.style.cssText = `
+    margin-left:auto; background:#92400e; color:#fef3c7;
+    border:none; border-radius:3px; padding:3px 10px;
+    cursor:pointer; font:500 11px 'Inter',system-ui;
+  `;
+  openBtn.textContent = '在系统浏览器中打开';
+  openBtn.addEventListener('click', () => handoffToSystemBrowser());
+
+  const dismissBtn = document.createElement('button');
+  dismissBtn.style.cssText = `
+    background:none; border:none; color:#64748b; cursor:pointer;
+    font-size:14px; padding:0 4px; line-height:1;
+  `;
+  dismissBtn.setAttribute('aria-label', '关闭兼容提示');
+  dismissBtn.textContent = '✕';
+  dismissBtn.addEventListener('click', () => {
+    bar.remove();
+    _bannerShown = false;
+  });
+
+  bar.appendChild(msg);
+  bar.appendChild(openBtn);
+  bar.appendChild(dismissBtn);
+  document.body.prepend(bar);
+}
+
+function injectPaymentWarning(domain) {
+  // Only show once per domain per session
+  const key = `diatom:compat:payment:${domain}`;
+  if (sessionStorage.getItem(key)) return;
+  sessionStorage.setItem(key, '1');
+
+  const bar = document.createElement('div');
+  bar.style.cssText = `
+    position:fixed; top:0; left:0; right:0; z-index:2147483647;
+    background:#1e1b4b; border-bottom:1px solid rgba(139,92,246,.25);
+    color:#c4b5fd; font:500 12px/1.5 'Inter',system-ui;
+    padding:7px 12px; display:flex; align-items:center; gap:8px;
+  `;
+  bar.innerHTML = `
+    <span>🔐 此网站可能需要 U 盾或支付插件。Diatom 不支持私有插件。</span>
+    <button onclick="window.__diatom_handoff();" style="
+      margin-left:auto; background:#4c1d95; color:#ddd6fe; border:none;
+      border-radius:3px; padding:3px 10px; cursor:pointer; font:500 11px 'Inter',system-ui;">
+      切换到系统浏览器
+    </button>
+    <button onclick="this.parentElement.remove();" style="
+      background:none; border:none; color:#6b7280; cursor:pointer; font-size:14px;">✕</button>
+  `;
+  document.body.prepend(bar);
+}
+
+// ── System browser handoff ────────────────────────────────────────────────────
+
+export async function handoffToSystemBrowser(url) {
+  const target = url || location.href;
+  try {
+    await invoke('cmd_compat_handoff', { url: target });
+    // Brief visual confirmation
+    const msg = document.createElement('div');
+    msg.style.cssText = `
+      position:fixed; bottom:1.5rem; left:50%; transform:translateX(-50%);
+      background:rgba(15,23,42,.92); color:#94a3b8;
+      font:500 .75rem 'Inter',system-ui; padding:.4rem .8rem;
+      border-radius:.3rem; z-index:9999; pointer-events:none;
+    `;
+    msg.textContent = '已在系统浏览器中打开（追踪参数已剥离）';
+    document.body.appendChild(msg);
+    setTimeout(() => msg.remove(), 2500);
+  } catch (err) {
+    console.error('[compat] handoff failed:', err);
+  }
+}
+
+// Expose for inline button calls
+window.__diatom_handoff = handoffToSystemBrowser;
+window.__diatom_compat_handoff = handoffToSystemBrowser;
+
+// ── Legacy domain management ──────────────────────────────────────────────────
+
+export async function addCurrentDomainAsLegacy() {
+  const domain = domainOf(location.href);
+  await invoke('cmd_compat_add_legacy', { domain });
+}
+
+export async function removeCurrentDomainFromLegacy() {
+  const domain = domainOf(location.href);
+  await invoke('cmd_compat_remove_legacy', { domain });
+}
+
+// ── diatom:// URL routing ─────────────────────────────────────────────────────
+
+/**
+ * Handle internal diatom:// URLs.
+ * These are intercepted before navigation reaches the WebView.
+ *
+ * diatom://about          → /ui/about.html
+ * diatom://museum/:id     → thaw and display frozen bundle
+ * diatom://tools?tool=&input= → Wasm toolbox
+ */
+export function routeDiatomUrl(url) {
+  if (!url.startsWith('diatom://')) return null;
+
+  const parsed = (() => { try { return new URL(url); } catch { return null; } })();
+  if (!parsed) return null;
+
+  switch (parsed.hostname) {
+    case 'about':
+      return '/ui/about.html';
+    case 'museum': {
+      const id = parsed.pathname.slice(1);
+      return `/ui/museum-viewer.html?id=${encodeURIComponent(id)}`;
+    }
+    case 'tools':
+      return `/ui/wasm-tools.html${parsed.search}`;
+    default:
+      return null;
+  }
+}
