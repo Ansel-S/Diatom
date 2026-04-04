@@ -6,7 +6,7 @@
 [![Rust](https://img.shields.io/badge/Rust-1.78+-orange.svg)](https://rustup.rs)
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-purple.svg)](https://tauri.app)
 [![Binary](https://img.shields.io/badge/binary-%E2%89%A415MB-green.svg)](#)
-[![Status](https://img.shields.io/badge/status-v0.9.2-yellow.svg)](CHANGELOG.md)
+[![Status](https://img.shields.io/badge/status-v0.11.0-yellow.svg)](CHANGELOG.md)
 
 Most browsers are a window that lets you see the internet. Diatom is a filter that keeps the internet from seeing you.
 
@@ -54,7 +54,7 @@ Diatom runs entirely on your device. No accounts. No cloud sync. No analytics. N
 | **Compatibility Router** | Detects broken pages and offers a clean system browser handoff (tracking parameters stripped before handing off) |
 | **Accessibility** | Full ARIA injection + keyboard navigation for every chrome element |
 | **Adaptive tab budget** | Three interlocking models: resource-aware scaling, golden ratio zones (Focus 61.8% / Buffer 38.2%), and screen gravity (3 tabs on phone → 13 on ultrawide) |
-| **diatom://labs** | 14 experimental features — AI, privacy, performance, sync, interface — each with an honest stability and risk rating |
+| **diatom://labs** | 22 experimental features — AI, privacy, performance, sync, interface — each with an honest stability and risk rating |
 
 ---
 
@@ -68,7 +68,7 @@ Diatom has edges. We tell you where they are.
 - WebExtensions API — incompatible with the binary size budget and security model
 - Bank U-Shield / NPAPI plugins — non-standard proprietary interfaces
 
-**Filter rules (v0.9.2+):**
+**Filter rules (v0.11.0+):**
 Diatom ships a minimal built-in blocklist. For broader coverage, use the Privacy Presets
 button (or `diatom://onboarding`) to subscribe to EasyList, EasyPrivacy, or URLhaus.
 Diatom is the downloader; you choose the lists.
@@ -169,7 +169,7 @@ Type directly in the address bar:
 
 ```
 /json     Format and validate JSON
-/crypto   Base64 / SHA-256 / Hex conversion
+/crypto   Base64 / SHA-256 / BLAKE3 / Hex conversion
 /math     Symbolic computation + unit conversion
 /img      Local image compression (MozJPEG / WebP)
 ```
