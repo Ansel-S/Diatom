@@ -1,0 +1,14 @@
+/* Diatom Boost: Clean Reader — removes sidebars, ads, clutter */
+aside, .sidebar, .ad, .advertisement, [class*="sidebar"],
+[class*="sticky-ad"], [id*="sidebar"], [id*="newsletter"],
+[class*="cookie"], [class*="gdpr"], [class*="popup"],
+[class*="banner"]:not(header), iframe[src*="ads"],
+[class*="promo"], [class*="related-articles"],
+[class*="outbrain"], [class*="taboola"] {
+    display: none !important;
+}
+article, .article-body, .post-content, main {
+    max-width: 720px !important;
+    margin: 0 auto !important;
+    float: none !important;
+}

@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// diatom/src-tauri/src/echo.rs  — v7
+// diatom/src-tauri/src/echo.rs  — v8 (v0.10.0)
 //
 // The Echo: weekly persona-evolution analysis.
 //
@@ -8,6 +8,10 @@
 //   • No URLs or titles leave this module.
 //   • The caller (commands.rs) must zeroize() the EchoInput after compute.
 //   • Persisting an Echo is opt-in and handled by the caller (AES-GCM encrypted).
+//   • v0.10.0: ε-Differential Privacy noise applied to all output floats via
+//     dp_echo::privatise_echo() before returning to the caller.  Noise level
+//     is calibrated so it is invisible in the UI (< display precision) but
+//     prevents reconstruction of individual events from output time-series.
 //
 // Persona Spectrum axes:
 //   A = Scholar  (deep reading, long dwell, reading mode, low scroll velocity)
@@ -27,74 +31,77 @@ use zeroize::Zeroize;
 
 // ── Domain taxonomy ──────────────────────────────────────────────────────────
 
-/// Returns the persona axis weight for a given domain.
+/// Returns the persona axis weight for a given domain, with TF-IDF-inspired
+/// specificity scoring.
+///
+/// [FIX-ECHO-01] Previous implementation returned exactly 0.0 or 1.0 (binary).
+/// This made a single visit to wikipedia.org identical in scholar-weight to
+/// 3 hours of deep reading on arxiv.org. Now each domain carries a specificity
+/// coefficient (0.3–1.0) so tier-1 (high-signal) sources outweigh tier-3 (medium).
+///
 /// (scholar_weight, builder_weight, leisure_weight)
 fn domain_axis(domain: &str) -> (f32, f32, f32) {
-    // Scholar: academic, reference, long-form
-    const SCHOLAR_DOMAINS: &[&str] = &[
-        "wikipedia.org",
-        "arxiv.org",
-        "pubmed.ncbi.nlm.nih.gov",
-        "jstor.org",
-        "ncbi.nlm.nih.gov",
-        "scholar.google",
-        "nature.com",
-        "sciencedirect.com",
-        "semanticscholar.org",
-        "phys.org",
-        "aeon.co",
-        "medium.com",
-        "substack.com",
-        "longreads.com",
-        "the-atlantic.com",
-        "newyorker.com",
-        "economist.com",
+    let d = domain.to_lowercase();
+
+    // ── Scholar: academic, reference, long-form ───────────────────────────────
+    // Tier-1 (0.9): peer-reviewed / primary research sources
+    const SCHOLAR_T1: &[&str] = &[
+        "arxiv.org", "pubmed.ncbi.nlm.nih.gov", "jstor.org",
+        "nature.com", "sciencedirect.com", "semanticscholar.org",
+        "ncbi.nlm.nih.gov", "scholar.google",
     ];
-    // Builder: code, tooling, productivity
-    const BUILDER_DOMAINS: &[&str] = &[
-        "github.com",
-        "gitlab.com",
-        "stackoverflow.com",
-        "docs.rs",
-        "crates.io",
-        "developer.mozilla.org",
-        "rust-lang.org",
-        "npmjs.com",
-        "pypi.org",
-        "pkg.go.dev",
-        "hackernews",
-        "news.ycombinator.com",
-        "lobste.rs",
-        "figma.com",
-        "linear.app",
-        "notion.so",
-        "obsidian.md",
-        "code.visualstudio.com",
+    // Tier-2 (0.65): quality journalism, long-form essays
+    const SCHOLAR_T2: &[&str] = &[
+        "wikipedia.org", "aeon.co", "longreads.com",
+        "the-atlantic.com", "newyorker.com", "economist.com",
+        "phys.org", "quanta magazine", "quantamagazine.org",
     ];
-    // Leisure: social, media, short-form
-    const LEISURE_DOMAINS: &[&str] = &[
-        "twitter.com",
-        "x.com",
-        "reddit.com",
-        "instagram.com",
-        "tiktok.com",
-        "youtube.com",
-        "bilibili.com",
-        "weibo.com",
-        "douyin.com",
-        "facebook.com",
-        "pinterest.com",
-        "tumblr.com",
-        "discord.com",
-        "twitch.tv",
-        "9gag.com",
+    // Tier-3 (0.35): general knowledge, mixed quality
+    const SCHOLAR_T3: &[&str] = &[
+        "medium.com", "substack.com", "blog.", "dev.to",
     ];
 
-    let d = domain.to_lowercase();
-    let scholar = SCHOLAR_DOMAINS.iter().any(|s| d.contains(s)) as i32 as f32;
-    let builder = BUILDER_DOMAINS.iter().any(|s| d.contains(s)) as i32 as f32;
-    let leisure = LEISURE_DOMAINS.iter().any(|s| d.contains(s)) as i32 as f32;
-    (scholar, builder, leisure)
+    // ── Builder: code, tooling, productivity ──────────────────────────────────
+    const BUILDER_T1: &[&str] = &[
+        "github.com", "gitlab.com", "docs.rs", "crates.io",
+        "developer.mozilla.org", "rust-lang.org",
+        "stackoverflow.com", "pkg.go.dev",
+    ];
+    const BUILDER_T2: &[&str] = &[
+        "npmjs.com", "pypi.org", "hackernews", "news.ycombinator.com",
+        "lobste.rs", "figma.com", "linear.app", "notion.so",
+        "obsidian.md", "code.visualstudio.com",
+    ];
+    const BUILDER_T3: &[&str] = &[
+        "reddit.com/r/programming", "reddit.com/r/rust",
+        "reddit.com/r/webdev", "hashnode.com",
+    ];
+
+    // ── Leisure: social, media, short-form ────────────────────────────────────
+    const LEISURE_T1: &[&str] = &[
+        "tiktok.com", "instagram.com", "douyin.com",
+        "9gag.com", "twitch.tv", "shorts",
+    ];
+    const LEISURE_T2: &[&str] = &[
+        "twitter.com", "x.com", "reddit.com", "weibo.com",
+        "facebook.com", "pinterest.com", "tumblr.com", "discord.com",
+    ];
+    const LEISURE_T3: &[&str] = &[
+        "youtube.com", "bilibili.com", "netflix.com",
+    ];
+
+    let score = |t1: &[&str], t2: &[&str], t3: &[&str]| -> f32 {
+        if t1.iter().any(|s| d.contains(s)) { return 0.9; }
+        if t2.iter().any(|s| d.contains(s)) { return 0.65; }
+        if t3.iter().any(|s| d.contains(s)) { return 0.35; }
+        0.0
+    };
+
+    (
+        score(SCHOLAR_T1, SCHOLAR_T2, SCHOLAR_T3),
+        score(BUILDER_T1, BUILDER_T2, BUILDER_T3),
+        score(LEISURE_T1, LEISURE_T2, LEISURE_T3),
+    )
 }
 
 // ── Input / Output types ──────────────────────────────────────────────────────

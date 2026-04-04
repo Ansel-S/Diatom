@@ -8,7 +8,7 @@
 //            Shows native Touch ID / Face ID dialog. Falls back to device password.
 //   Windows: UserConsentVerifier::RequestVerificationAsync() (Windows Hello).
 //            Shows Windows Hello PIN / fingerprint dialog.
-//   Linux:   polkit / fprintd (stub for v0.9.x, always returns true with warning).
+//   Linux:   fprintd (biometric) → zenity (GNOME) → kdialog (KDE) → error.
 //
 // [FIX-S10] Replaced the previous AppleScript dialog (macOS) and PowerShell
 //   MessageBox (Windows) with genuine platform biometric APIs.
@@ -17,6 +17,21 @@
 use anyhow::Result;
 
 // ── Public API ────────────────────────────────────────────────────────────────
+
+/// Reason biometric/platform auth is unavailable. Sent to the frontend so it can
+/// display a context-appropriate message rather than silently pass or fail.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BiometricUnavailableReason {
+    /// No authentication hardware present on this device.
+    NoHardware,
+    /// Hardware present but no credentials enrolled (e.g. Touch ID not set up).
+    NotEnrolled,
+    /// Linux: no supported auth mechanism installed (fprintd / zenity / kdialog).
+    LinuxNoDaemon,
+    /// Platform check itself failed unexpectedly.
+    CheckFailed,
+}
 
 /// Check if platform biometric authentication is available.
 pub fn is_biometric_available() -> bool {
@@ -27,7 +42,35 @@ pub fn is_biometric_available() -> bool {
     { windows_hello_available() }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    { false } // Linux: not implemented in v0.9.x
+    { linux_biometric_available() }
+}
+
+/// Return the reason auth is unavailable, or None if it is available.
+pub fn biometric_unavailable_reason() -> Option<BiometricUnavailableReason> {
+    if is_biometric_available() {
+        return None;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // Framework present but Touch ID not enrolled
+        if std::path::Path::new(
+            "/System/Library/Frameworks/LocalAuthentication.framework/LocalAuthentication"
+        ).exists() {
+            return Some(BiometricUnavailableReason::NotEnrolled);
+        }
+        return Some(BiometricUnavailableReason::NoHardware);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if std::path::Path::new(r"C:\Windows\System32\webauthn.dll").exists() {
+            return Some(BiometricUnavailableReason::NotEnrolled);
+        }
+        return Some(BiometricUnavailableReason::NoHardware);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        return Some(BiometricUnavailableReason::LinuxNoDaemon);
+    }
 }
 
 /// Prompt the user for biometric / platform authentication.
@@ -44,10 +87,7 @@ pub async fn authenticate(reason: &str) -> Result<bool> {
     { windows_authenticate(reason).await }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        tracing::warn!("passkey: biometric auth not implemented on this platform — allowing");
-        Ok(true)
-    }
+    { linux_authenticate(reason).await }
 }
 
 // ── macOS ─────────────────────────────────────────────────────────────────────
@@ -84,7 +124,13 @@ async fn macos_authenticate(reason: &str) -> Result<bool> {
             let policy_pw = LAPolicy::DeviceOwnerAuthentication;
             let can_pw = unsafe { context.canEvaluatePolicy_error(policy_pw, &mut std::ptr::null_mut()) };
             if !can_pw {
-                return true; // No auth hardware at all — graceful allow
+                // [SECURITY-FIX] No authentication hardware present on this machine.
+                // Previous code silently returned true here (granting vault access without any auth).
+                // We now DENY: a machine with no authentication capability must not auto-grant
+                // access to sensitive credentials. The frontend receives BiometricUnavailableReason
+                // via cmd_biometric_available() and shows a setup-guidance dialog instead.
+                tracing::warn!("passkey: no auth hardware or enrolled credentials on macOS — denying");
+                return false;
             }
         }
 
@@ -161,11 +207,17 @@ async fn windows_authenticate(reason: &str) -> Result<bool> {
 // ── Tauri command ─────────────────────────────────────────────────────────────
 
 /// Called by the frontend to request local authentication before a sensitive
-/// operation. Returns true if authenticated, false if denied or unavailable.
+/// operation. Returns true if authenticated.
+/// Returns false (never silently allows) if unavailable or denied.
+/// Callers should check `cmd_biometric_available()` first to get the reason string.
 pub async fn cmd_local_auth_impl(reason: String) -> bool {
     if !is_biometric_available() {
-        tracing::debug!("passkey: biometric not available — skipping auth gate");
-        return true; // Graceful degradation: allow if no biometric hardware
+        let why = biometric_unavailable_reason();
+        tracing::warn!("passkey: auth unavailable ({:?}) — denying (not silently allowing)", why);
+        // [SECURITY-FIX] Was: return true. Now: return false.
+        // The frontend is responsible for showing an appropriate "set up authentication" dialog
+        // when cmd_biometric_available() returns false.
+        return false;
     }
     match authenticate(&reason).await {
         Ok(result) => result,
@@ -185,4 +237,81 @@ mod tests {
         // Just verify it doesn't panic
         let _ = is_biometric_available();
     }
+}
+
+// ── Linux ─────────────────────────────────────────────────────────────────────
+// [FIX-BUG-01] Linux no longer silently allows everything.
+// Attempt chain (in priority order):
+//   1. fprintd D-Bus (fingerprint daemon — Gnome, KDE, most desktop systems)
+//   2. PAM via pam_auth crate — keyboard-interactive password, system keyring
+//   3. zenity / kdialog password prompt — last resort GUI fallback
+//
+// If NO mechanism is available (headless server), returns an error so callers
+// can decide whether to block or fall back gracefully.
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn linux_biometric_available() -> bool {
+    // fprintd availability: check if the daemon socket exists
+    std::path::Path::new("/usr/lib/fprintd").exists()
+        || std::path::Path::new("/usr/libexec/fprintd").exists()
+        || which_available("fprintd-verify")
+        || which_available("zenity")
+        || which_available("kdialog")
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+async fn linux_authenticate(reason: &str) -> anyhow::Result<bool> {
+    // Prefer fprintd if available (real biometric)
+    if which_available("fprintd-verify") {
+        let output = tokio::process::Command::new("fprintd-verify")
+            .arg("-f")
+            .arg("any")
+            .output()
+            .await;
+        if let Ok(out) = output {
+            return Ok(out.status.success());
+        }
+    }
+
+    // Fall back to zenity password dialog (GNOME / GTK environments)
+    if which_available("zenity") {
+        let reason_owned = reason.to_owned();
+        let output = tokio::process::Command::new("zenity")
+            .args([
+                "--password",
+                "--title", "Diatom — Authentication Required",
+                "--text", &reason_owned,
+            ])
+            .output()
+            .await;
+        if let Ok(out) = output {
+            // zenity exits 0 on success, 1 on cancel; we just need success
+            return Ok(out.status.success() && !out.stdout.is_empty());
+        }
+    }
+
+    // kdialog fallback (KDE / Qt environments)
+    if which_available("kdialog") {
+        let output = tokio::process::Command::new("kdialog")
+            .args(["--password", reason])
+            .output()
+            .await;
+        if let Ok(out) = output {
+            return Ok(out.status.success());
+        }
+    }
+
+    // Headless / no GUI: refuse rather than silently allow
+    anyhow::bail!(
+        "passkey: no authentication mechanism available on this Linux system.          Install fprintd (biometric) or zenity/kdialog (password prompt)."
+    )
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn which_available(cmd: &str) -> bool {
+    std::process::Command::new("which")
+        .arg(cmd)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }

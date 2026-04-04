@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "webview-content",
+  "description": "Capability set for third-party web content loaded in the main WebView. Intentionally grants ZERO IPC permissions. Even if a page attempts to call window.__TAURI__.invoke(), every command will be rejected. This is the security boundary between Diatom chrome (trusted) and arbitrary web content (untrusted). Tauri 2.0 enforces this via origin-based capability matching: the 'default' capability applies to asset:// / diatom:// origins; this capability (no permissions) applies to all other origins.",
+  "windows": ["main"],
+  "permissions": []
+}

@@ -1,5 +1,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// diatom/src-tauri/src/state.rs  — v0.9.2
+// diatom/src-tauri/src/state.rs  — v0.11.0
+// [NEW-v0.9.5] VaultStore added for password manager.
 //
 // [FIX-persistence-totp]  TotpStore loaded from DB with encrypted secrets.
 // [FIX-persistence-trust] TrustStore loaded from DB.
@@ -11,15 +12,24 @@
 use crate::{
     db::Db, decoy::DecoyState, privacy::PrivacyConfig, rss::RssStore, sentinel::SentinelCache,
     tab_budget::TabBudgetConfig, tabs::TabStore, totp::TotpStore,
-    trust::TrustStore, zen::ZenConfig,
+    trust::TrustStore, vault::VaultStore, zen::ZenConfig,
+    net_monitor::NetMonitor, local_file_bridge::LocalFileBridge,
+    ghostpipe::GhostPipeConfig,
 };
 use anyhow::Result;
 use std::{
     collections::HashSet,
     path::PathBuf,
-    sync::{Arc, Mutex, RwLock, atomic::AtomicBool},
+    sync::{Arc, Mutex, RwLock},
 };
+use aho_corasick::AhoCorasick;
 use tokio::sync::Mutex as AsyncMutex;
+// [AUDIT-FIX §2.2] CancellationToken for cooperative shutdown of background tasks.
+// Sentinel (3600 s sleep), tab-budget loop (60 s), and threat-refresh loop
+// (7-day sleep) would otherwise block the tokio runtime from exiting cleanly
+// when the main window is destroyed. token.cancel() is called in the
+// WindowEvent::Destroyed handler in main.rs.
+use tokio_util::sync::CancellationToken;
 
 pub struct AppState {
     pub db: Db,
@@ -29,6 +39,7 @@ pub struct AppState {
     pub trust: Mutex<TrustStore>,
     pub totp: Mutex<TotpStore>,
     pub rss: Mutex<RssStore>,
+    pub vault: Mutex<VaultStore>,
     pub data_dir: PathBuf,
 
     pub noise_seed: Mutex<u64>,
@@ -43,12 +54,39 @@ pub struct AppState {
 
     pub tab_budget_cfg: Mutex<TabBudgetConfig>,
     pub screen_width_px: Mutex<u32>,
-    pub slm_shutdown: Mutex<Option<Arc<AtomicBool>>>,
+    /// [B-06 FIX] Replaced Arc<AtomicBool> with CancellationToken so SLM
+    /// server exits immediately on shutdown (no 100ms poll loop).
+    pub slm_shutdown_token: Mutex<Option<tokio_util::sync::CancellationToken>>,
+    /// [B-03 FIX] Live power budget — updated every 5 minutes by the power
+    /// monitor task in main.rs. Background loops read their sleep intervals
+    /// from this field rather than using hardcoded constants.
+    pub power_budget: Mutex<crate::power_budget::PowerBudget>,
+    pub plugin_registry:        crate::wasm_sandbox::PluginRegistry,
     /// [FIX-SLM-CACHE] Cached SlmServer — initialised once per session,
     /// cleared when backend changes (cmd_slm_reset) or privacy_mode toggles.
     pub slm_cache: AsyncMutex<Option<Arc<crate::slm::SlmServer>>>,
 
+    /// [FIX-BLOCKER-01] Live dynamic blocker — hot-reloaded when filter lists are fetched.
+    /// Contains both the built-in 60k+ patterns AND any user-subscribed list rules.
+    /// Stored as Arc<RwLock<>> so fetch tasks can swap it without blocking requests.
+    pub live_blocker: Arc<RwLock<Option<aho_corasick::AhoCorasick>>>,
+
+    /// [NEW v0.4.0] Outbound Traffic Monitor — Proof of Privacy
+    pub net_monitor: Arc<NetMonitor>,
+
+    /// [NEW v0.4.0] Local file bridge — diatom://local/ protocol (disabled by default).
+    pub local_file_bridge: Arc<LocalFileBridge>,
+
+    /// [NEW v0.4.0] GhostPipe DNS Tunnelconfiguration
+    pub ghostpipe: RwLock<GhostPipeConfig>,
+
     pub sentinel: Mutex<SentinelCache>,
+
+    /// [AUDIT-FIX §2.2] Global cooperative shutdown signal.
+    /// Cancelled in WindowEvent::Destroyed so all background tasks (sentinel,
+    /// tab-budget, threat-refresh) exit their sleep loops promptly and the
+    /// tokio runtime can shut down without delay.
+    pub shutdown_token: CancellationToken,
 
     /// Cached platform string for WebGL/UA spoofing ("macos" | "windows" | "linux")
     pub platform: &'static str,
@@ -58,7 +96,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(data_dir: PathBuf) -> Result<Self> {
+    pub fn new(data_dir: PathBuf, initial_power: crate::power_budget::PowerBudget) -> Result<Self> {
         let db = Db::open(&data_dir.join("diatom.db"))?;
         std::fs::create_dir_all(data_dir.join("bundles"))?;
 
@@ -76,6 +114,7 @@ impl AppState {
         let totp = TotpStore::load_from_db(&db, &master_key);
         let trust = TrustStore::load_from_db(&db);
         let rss = RssStore::load_from_db(&db);
+        let vault = VaultStore::load_from_db(&db, &master_key);
 
         // [FIX-zen] Load Zen config from DB
         let zen = db.zen_load().map(|raw| ZenConfig::from_raw(&raw)).unwrap_or_default();
@@ -110,6 +149,7 @@ impl AppState {
             trust: Mutex::new(trust),
             totp: Mutex::new(totp),
             rss: Mutex::new(rss),
+            vault: Mutex::new(vault),
             data_dir,
             noise_seed: Mutex::new(rand::random()),
             zen: Mutex::new(zen),
@@ -121,11 +161,20 @@ impl AppState {
             storage_budget: Mutex::new(storage_budget),
             tab_budget_cfg: Mutex::new(tab_budget_cfg),
             screen_width_px: Mutex::new(1440),
-            slm_shutdown: Mutex::new(None),
+            slm_shutdown_token: Mutex::new(None),
             slm_cache: AsyncMutex::new(None),
+            power_budget: Mutex::new(initial_power),
             sentinel: Mutex::new(sentinel),
             platform,
             decoy: Mutex::new(DecoyState::default()),
+            shutdown_token: CancellationToken::new(),
+            // [FIX-BLOCKER-01] Start with None — populated by boot_fetch_builtin_lists()
+            // called from main.rs after AppState is constructed. The static BLOCKER
+            // automaton (BUILTIN_PATTERNS) handles all requests until the live blocker loads.
+            live_blocker: Arc::new(RwLock::new(None)),
+            net_monitor: Arc::new(NetMonitor::default()),
+            local_file_bridge: Arc::new(LocalFileBridge::default()),
+            ghostpipe: RwLock::new(GhostPipeConfig::default()),
         })
     }
 
@@ -200,6 +249,6 @@ impl AppState {
                 return ua;
             }
         }
-        crate::blocker::DIATOM_UA.to_owned()
+        crate::blocker::platform_fallback_ua().to_owned()
     }
 }

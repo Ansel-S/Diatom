@@ -78,7 +78,7 @@ async fn fetch_robots_disallowed(origin: &str) -> Vec<String> {
     };
 
     let text = match client.get(&robots_url)
-        .header("User-Agent", crate::blocker::DIATOM_UA)
+        .header("User-Agent", crate::blocker::platform_fallback_ua())
         .send().await
     {
         Ok(resp) => match resp.text().await { Ok(t) => t, Err(_) => return vec![] },
@@ -186,7 +186,7 @@ pub async fn fire_noise_request(
         .build().ok()?;
 
     let result = client.get(&url)
-        .header("User-Agent", crate::blocker::DIATOM_UA)
+        .header("User-Agent", crate::blocker::platform_fallback_ua())
         .header("DNT", "1")
         .header("Sec-GPC", "1")
         .send().await;
@@ -319,7 +319,7 @@ pub async fn fire_after_check(
 
     let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build().ok()?;
     let result = client.get(&url)
-        .header("User-Agent", crate::blocker::DIATOM_UA)
+        .header("User-Agent", crate::blocker::platform_fallback_ua())
         .header("DNT", "1").header("Sec-GPC", "1")
         .send().await;
 

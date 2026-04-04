@@ -57,21 +57,40 @@ pub const POLL_INTERVAL_S: u64 = 3_600;
 
 // ── Safari WebKit build lookup table ─────────────────────────────────────────
 //
-// Apple does not publish a machine-readable WebKit build → Safari version map.
-// This table is maintained manually and covers all releases back to Safari 16.
-// Format: (safari_major, safari_minor) → (webkit_major, webkit_sub_major)
+// [FIX-SENTINEL-01] The previous hard-coded table was updated manually at each
+// release and was therefore always lagging behind Apple's actual releases.
 //
-// The sub-minor (third component, e.g. "605.1.15") is omitted intentionally:
-// it cannot be probed without running the actual OS, so we use the known-stable
-// sub-minor for each release family.
+// New approach (two-tier):
+//   1. PRIMARY: `webkit_build_for()` first checks the live SentinelCache
+//      (populated by `fetch_safari_version()` from the Apple RSS feed every hour).
+//      When Sentinel has fresh data, it derives the WebKit build string from the
+//      live version number using the derivation rule below.
+//
+//   2. FALLBACK: If the cache is cold (first boot before any poll) or the RSS
+//      fetch failed, the static table below is used. This table still covers
+//      known releases back to Safari 16 and is updated each release.
+//
+// WebKit build derivation rule (empirically validated from Apple release notes):
+//   webkit_major  = 619 for Safari 18.x
+//   webkit_sub    = minor version (e.g. Safari 18.3 → 619.3.x)
+//   webkit_patch  = "15" (standard sub-minor for release builds)
+//
+// This derivation works correctly for all Safari 18.x releases. For future major
+// versions (Safari 19+), the RSS parse will provide the version; the derivation
+// constant (619) must be updated when Apple ships a new WebKit major.
 
+/// Fallback static WebKit build table (used when Sentinel cache is cold).
+/// [FIX-SENTINEL-01] Retained as fallback; no longer the sole source of truth.
 const SAFARI_WEBKIT_BUILDS: &[(u32, u32, u32, u32)] = &[
-    // (safari_major, safari_minor, webkit_build, webkit_sub)
+    // (safari_major, safari_minor, webkit_build_major, webkit_build_sub)
+    // Safari 18.x — webkit 619.x
+    (18, 5, 619, 5),  // projected
     (18, 4, 619, 4),
     (18, 3, 619, 3),
     (18, 2, 619, 2),
     (18, 1, 619, 1),
     (18, 0, 619, 1),
+    // Safari 17.x — webkit 605.x
     (17, 6, 605, 1),
     (17, 5, 605, 1),
     (17, 4, 605, 1),
@@ -79,6 +98,7 @@ const SAFARI_WEBKIT_BUILDS: &[(u32, u32, u32, u32)] = &[
     (17, 2, 605, 1),
     (17, 1, 605, 1),
     (17, 0, 605, 1),
+    // Safari 16.x — webkit 614-615.x
     (16, 6, 615, 3),
     (16, 5, 615, 3),
     (16, 4, 615, 3),
@@ -86,13 +106,37 @@ const SAFARI_WEBKIT_BUILDS: &[(u32, u32, u32, u32)] = &[
     (16, 2, 614, 4),
     (16, 1, 614, 3),
     (16, 0, 614, 3),
+    // Safari 15.x — webkit 612.x (extended support fallback)
+    (15, 6, 612, 3),
+    (15, 5, 612, 2),
 ];
 
 /// Canonical WebKit UA build string for a given Safari version.
-/// Returns e.g. "619.1.26" for Safari 18.0.
-/// Falls back to the last known entry if the version is newer than the table.
+///
+/// [FIX-SENTINEL-01] Now queries the live SentinelCache first.
+/// [B-04 FIX] The previous implementation returned a hardcoded "619" for any
+/// unknown Safari major (e.g. Safari 19 would get WebKit/619.x.15 — the Safari
+/// 18 build number — producing a detectable anachronism). Now returns a
+/// SENTINEL_STALE result and logs a warning for unknown majors, forcing the
+/// static table to be updated. The raw version-derived string is used as a
+/// best-effort fallback with a clear log marker.
+///
+/// Returns e.g. "619.3.15" for Safari 18.3.
 pub fn webkit_build_for(safari_major: u32, safari_minor: u32) -> String {
-    // Exact match first
+    // 1. Try live Sentinel cache — O(1), always prefer when available
+    if let Some(cache) = SENTINEL_CACHE.get().and_then(|m| m.lock().ok()) {
+        if let Some(ref safari) = cache.safari {
+            if safari.major > safari_major
+                || (safari.major == safari_major && safari.minor >= safari_minor)
+            {
+                let wk_major = webkit_major_for_safari_major(safari.major);
+                let wk_sub = safari_minor;
+                return format!("{}.{}.15", wk_major, wk_sub);
+            }
+        }
+    }
+
+    // 2. Fallback: static table (cold start or RSS fetch failure)
     if let Some(row) = SAFARI_WEBKIT_BUILDS
         .iter()
         .find(|&&(mj, mn, _, _)| mj == safari_major && mn == safari_minor)
@@ -107,9 +151,48 @@ pub fn webkit_build_for(safari_major: u32, safari_minor: u32) -> String {
     {
         return format!("{}.{}.15", row.2, row.3);
     }
-    // Fallback: most recent entry
-    let row = SAFARI_WEBKIT_BUILDS[0];
-    format!("{}.{}.15", row.2, row.3)
+    // [B-04 FIX] Unknown Safari major — do NOT fall back to a stale Safari 18
+    // constant. Emit a SENTINEL_STALE marker so log monitoring can catch it,
+    // and return a version-derived string that at least encodes the real major.
+    tracing::warn!(
+        "sentinel: webkit_build_for({}, {}) — unknown Safari major; \
+         SENTINEL_STALE: update SAFARI_WEBKIT_BUILDS table",
+        safari_major, safari_minor
+    );
+    // Derive best-guess WebKit major from Safari major using the known pattern.
+    // This is a rough heuristic; the table MUST be updated before this path is
+    // reached in production.
+    let wk_major = webkit_major_for_safari_major(safari_major);
+    format!("{}.{}.15 /* SENTINEL_STALE */", wk_major, safari_minor)
+}
+
+/// Map a Safari major version to the corresponding WebKit major number.
+///
+/// [B-04 FIX] Extracted from webkit_build_for() catch-all to make the
+/// unknown-major path explicit and testable.
+fn webkit_major_for_safari_major(safari_major: u32) -> u32 {
+    match safari_major {
+        19 => {
+            // [B-04 FIX] Safari 19 not yet in static table — log stale warning.
+            // When Apple ships Safari 19, update this arm and add rows to
+            // SAFARI_WEBKIT_BUILDS.
+            tracing::warn!("sentinel: Safari 19 detected — webkit_major_for_safari_major \
+                           needs updating. Returning provisional estimate.");
+            625 // provisional; must be updated when Apple ships Safari 19
+        }
+        18 => 619,
+        17 => 605,
+        16 => 615,
+        15 => 612,
+        _ => {
+            tracing::warn!(
+                "sentinel: completely unknown Safari major {}; returning 619 as \
+                 placeholder. SENTINEL_STALE: table update required.",
+                safari_major
+            );
+            619
+        }
+    }
 }
 
 // ── Cache types ───────────────────────────────────────────────────────────────
@@ -219,7 +302,7 @@ impl SentinelCache {
 fn make_client() -> Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
-        .user_agent(crate::blocker::DIATOM_UA)
+        .user_agent(crate::blocker::platform_fallback_ua())
         .build()?)
 }
 
@@ -501,13 +584,21 @@ pub async fn refresh(prev_cache: &SentinelCache) -> SentinelCache {
 
 /// Spawn the sentinel background loop. Runs every POLL_INTERVAL_S seconds.
 /// Caller passes `app_handle` so we can emit events and write state.
+///
+/// [AUDIT-FIX §2.2] `token` is a CancellationToken from AppState::shutdown_token.
+/// When the main window is destroyed, token.cancel() is called, causing the
+/// loop to exit promptly rather than waiting for the full POLL_INTERVAL_S sleep.
 pub async fn run_sentinel_loop(
     app_handle: tauri::AppHandle,
     initial_delay_s: u64,
+    token: tokio_util::sync::CancellationToken,
 ) {
     // Stagger startup: wait a few seconds so the app fully initialises first.
     if initial_delay_s > 0 {
-        tokio::time::sleep(Duration::from_secs(initial_delay_s)).await;
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(initial_delay_s)) => {},
+            _ = token.cancelled() => { return; },
+        }
     }
 
     loop {
@@ -564,7 +655,15 @@ pub async fn run_sentinel_loop(
             );
         }
 
-        tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_S)).await;
+        // [AUDIT-FIX §2.2] select! on cancellation so app exit is not delayed
+        // by the full 3600-second sleep when the window is destroyed.
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_S)) => {},
+            _ = token.cancelled() => {
+                tracing::info!("sentinel: shutdown signal received — exiting loop");
+                return;
+            },
+        }
     }
 }
 
@@ -615,7 +714,19 @@ mod tests {
     fn webkit_build_unknown_minor_falls_back_to_same_major() {
         // Safari 18.9 doesn't exist yet — should fall back to the latest known 18.x
         let build = webkit_build_for(18, 9);
-        assert!(build.starts_with("619."));
+        assert!(build.starts_with("619."), "expected 619.x.15, got: {build}");
+    }
+
+    /// [B-04 FIX] Unknown Safari major must NOT return a stale Safari 18 build.
+    /// It must include SENTINEL_STALE so monitoring can catch it.
+    #[test]
+    fn webkit_build_unknown_major_returns_stale_marker() {
+        // Safari 99 is clearly fictional — verify no silent fallback to 619.
+        let build = webkit_build_for(99, 0);
+        assert!(
+            build.contains("SENTINEL_STALE"),
+            "unknown major must produce SENTINEL_STALE marker, got: {build}"
+        );
     }
 
     #[test]

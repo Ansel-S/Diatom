@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// diatom/src-tauri/src/db.rs  — v0.9.2
+// diatom/src-tauri/src/db.rs  — v0.9.5
 //
 // [FIX-05] Migration v2 ALTER TABLE is now idempotent (per-statement IGNORE).
 // [FIX-16] museum_fts kept in sync via INSERT/DELETE/UPDATE triggers.
@@ -12,6 +12,33 @@
 // [FIX-zen]  zen_save / zen_load added.
 // [NEW] filter_subscriptions, nostr_relays, onboarding tables.
 // [NEW] add_time_saved() so war_report can write real data.
+//
+// ── ASYNC USAGE CONTRACT (AUDIT-FIX §4.1) ─────────────────────────────────
+// rusqlite uses a synchronous API backed by a std::sync::Mutex-guarded
+// Connection. Calling any Db method directly inside an async Tauri command
+// will block the current tokio worker thread for the duration of the SQLite
+// operation. For short-duration operations (single row read/write, index
+// lookup) this is acceptable — the lock hold time is typically < 1 ms.
+//
+// RULE: Any DB operation that could take > 5 ms (FTS search, bulk insert,
+// migration, large list scan) MUST be wrapped in tokio::task::spawn_blocking:
+//
+//   let result = tokio::task::spawn_blocking(move || {
+//       state.db.search_history(query, ws)
+//   }).await?;
+//
+// The clippy::await_holding_lock lint (enabled in .cargo/config.toml) will
+// warn if a MutexGuard from std::sync is held across an .await point, which
+// is the primary risk vector. However, this lint does not fire on methods that
+// acquire and release the lock internally (as Db methods do) — so the
+// spawn_blocking discipline must be enforced by code review and the comments
+// below on each heavy-query method.
+//
+// Methods that warrant spawn_blocking at call sites:
+//   • search_history()    — FTS query, O(history_size)
+//   • list_bundles()      — joined table scan
+//   • museum_search()     — FTS query
+//   • run_migrations()    — DDL, only at startup (acceptable to block)
 // ─────────────────────────────────────────────────────────────────────────────
 
 use anyhow::{Context, Result};
@@ -23,15 +50,22 @@ use std::{path::Path, sync::{Arc, Mutex}};
 
 // ── Schema helpers ────────────────────────────────────────────────────────────
 
-/// Execute a statement, ignoring "duplicate column" and "already exists" errors
-/// that arise when migrations are re-run on a partially-migrated database.
+/// Execute DDL statements idempotently.
+///
+/// [B-07 FIX] The v0.11.0 implementation caught SQLITE_ERROR (code 1) to
+/// swallow "table already exists" errors. Code 1 is SQLITE_ERROR — a generic
+/// code covering invalid SQL, wrong column types, missing tables, and more.
+/// A real migration failure (e.g. wrong type on ALTER TABLE) would be silently
+/// swallowed, leaving the DB in a partially-migrated state with no diagnostic.
+///
+/// Fix: check the error message text instead. Only suppress errors whose
+/// message contains "already exists" or "duplicate column".
+/// Alternatively, prefer IF NOT EXISTS in all DDL so this path is never needed.
 fn exec_idempotent(conn: &Connection, sql: &str) -> rusqlite::Result<()> {
     match conn.execute_batch(sql) {
         Ok(_) => Ok(()),
-        Err(rusqlite::Error::SqliteFailure(ref e, _))
-            if e.code == rusqlite::ErrorCode::Unknown
-                // SQLite error 1 covers "duplicate column name" and "table already exists"
-                || e.extended_code == 1 =>
+        Err(rusqlite::Error::SqliteFailure(_, Some(ref msg)))
+            if msg.contains("already exists") || msg.contains("duplicate column") =>
         {
             Ok(())
         }
@@ -166,6 +200,71 @@ const MIGRATIONS: &[(u32, &str)] = &[
         );
         INSERT OR IGNORE INTO zen_state(id) VALUES(1);
     "),
+    // v3.5: Add algorithm/digits/period columns to totp_entries (idempotent ALTERs)
+    // These columns were added in v0.9.5 to support SHA-256/512 and Steam TOTP.
+    // They are handled via exec_idempotent (no-op if column already exists).
+    // NOTE: This is folded into the v4 migration block below for atomicity.
+    // v4: Vault (password manager) — login entries, credit cards, secure notes
+    // [NEW-vault] Inspired by Proton Pass architecture: every sensitive field
+    // individually AES-256-GCM encrypted at rest using the existing master key.
+    // FTS5 for efficient title/username/URL search without scanning ciphertext.
+    // Separate tables for logins, cards, and notes match Proton Pass item types.
+    (4, "
+        ALTER TABLE totp_entries ADD COLUMN algorithm TEXT NOT NULL DEFAULT 'SHA1';
+        ALTER TABLE totp_entries ADD COLUMN digits INTEGER NOT NULL DEFAULT 6;
+        ALTER TABLE totp_entries ADD COLUMN period INTEGER NOT NULL DEFAULT 30;
+        CREATE TABLE IF NOT EXISTS vault_logins (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            username TEXT NOT NULL DEFAULT '',
+            password_enc TEXT NOT NULL,
+            urls_json TEXT NOT NULL DEFAULT '[]',
+            notes_enc TEXT NOT NULL DEFAULT '',
+            tags_json TEXT NOT NULL DEFAULT '[]',
+            totp_uri TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_vault_login_updated ON vault_logins(updated_at DESC);
+        CREATE VIRTUAL TABLE IF NOT EXISTS vault_logins_fts
+            USING fts5(title, username, urls_json, content=vault_logins, content_rowid=rowid);
+        CREATE TRIGGER IF NOT EXISTS vault_logins_fts_ai AFTER INSERT ON vault_logins BEGIN
+            INSERT INTO vault_logins_fts(rowid, title, username, urls_json)
+            VALUES (new.rowid, new.title, new.username, new.urls_json);
+        END;
+        CREATE TRIGGER IF NOT EXISTS vault_logins_fts_ad AFTER DELETE ON vault_logins BEGIN
+            INSERT INTO vault_logins_fts(vault_logins_fts, rowid, title, username, urls_json)
+            VALUES ('delete', old.rowid, old.title, old.username, old.urls_json);
+        END;
+        CREATE TRIGGER IF NOT EXISTS vault_logins_fts_au AFTER UPDATE ON vault_logins BEGIN
+            INSERT INTO vault_logins_fts(vault_logins_fts, rowid, title, username, urls_json)
+            VALUES ('delete', old.rowid, old.title, old.username, old.urls_json);
+            INSERT INTO vault_logins_fts(rowid, title, username, urls_json)
+            VALUES (new.rowid, new.title, new.username, new.urls_json);
+        END;
+        CREATE TABLE IF NOT EXISTS vault_cards (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            cardholder_enc TEXT NOT NULL DEFAULT '',
+            number_enc TEXT NOT NULL,
+            expiry TEXT NOT NULL DEFAULT '',
+            cvv_enc TEXT NOT NULL DEFAULT '',
+            notes_enc TEXT NOT NULL DEFAULT '',
+            tags_json TEXT NOT NULL DEFAULT '[]',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_vault_card_updated ON vault_cards(updated_at DESC);
+        CREATE TABLE IF NOT EXISTS vault_notes (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            content_enc TEXT NOT NULL,
+            tags_json TEXT NOT NULL DEFAULT '[]',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_vault_note_updated ON vault_notes(updated_at DESC);
+    "),
 ];
 
 // ── Db ────────────────────────────────────────────────────────────────────────
@@ -197,7 +296,7 @@ impl Db {
             if *v > version {
                 // [FIX-05] v2 has ALTER TABLE which fails if columns exist.
                 // Run statements individually, ignoring duplicate-column errors.
-                if *v == 2 {
+                if *v == 2 || *v == 4 {
                     // Run all non-ALTER statements normally, ALTER ones with IGNORE
                     let stmts: Vec<&str> = sql.split(';')
                         .map(|s| s.trim())
@@ -253,6 +352,10 @@ impl Db {
         Ok(())
     }
 
+    /// [AUDIT-FIX §4.1] FTS query — O(history_size). Call sites inside async
+    /// Tauri commands should wrap this in tokio::task::spawn_blocking to avoid
+    /// blocking a tokio worker thread. Short history sets (< 10 000 rows) are
+    /// acceptable inline; larger sets should use spawn_blocking.
     pub fn search_history(&self, workspace_id: &str, query: &str, limit: u32) -> Result<Vec<HistoryRow>> {
         let conn = self.0.lock().unwrap();
         // [FIX-18] Escape LIKE special characters
@@ -381,6 +484,8 @@ impl Db {
         Ok(())
     }
 
+    /// [AUDIT-FIX §4.1] Joined table scan — use spawn_blocking when called
+    /// from async Tauri commands with a large Museum (> 1000 bundles).
     pub fn list_bundles(&self, workspace_id: &str, limit: u32) -> Result<Vec<BundleRow>> {
         let conn = self.0.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -687,6 +792,101 @@ impl Db {
         let rows = stmt.query_map([], |r| r.get(0))?;
         rows.collect::<rusqlite::Result<_>>().context("nostr_relays_enabled")
     }
+
+    // ── Vault — Logins ────────────────────────────────────────────────────────
+
+    pub fn vault_login_upsert(&self, r: &VaultLoginRaw) -> Result<()> {
+        self.0.lock().unwrap().execute(
+            "INSERT OR REPLACE INTO vault_logins
+             (id,title,username,password_enc,urls_json,notes_enc,tags_json,totp_uri,created_at,updated_at)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+            params![r.id, r.title, r.username, r.password_enc, r.urls_json,
+                    r.notes_enc, r.tags_json, r.totp_uri, r.created_at, r.updated_at],
+        )?;
+        Ok(())
+    }
+
+    pub fn vault_login_delete(&self, id: &str) -> Result<()> {
+        self.0.lock().unwrap().execute("DELETE FROM vault_logins WHERE id=?1", [id])?;
+        Ok(())
+    }
+
+    pub fn vault_logins_raw(&self) -> Result<Vec<VaultLoginRaw>> {
+        let conn = self.0.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id,title,username,password_enc,urls_json,notes_enc,tags_json,totp_uri,created_at,updated_at
+             FROM vault_logins ORDER BY updated_at DESC")?;
+        let rows = stmt.query_map([], |r| Ok(VaultLoginRaw {
+            id: r.get(0)?, title: r.get(1)?, username: r.get(2)?,
+            password_enc: r.get(3)?, urls_json: r.get(4)?,
+            notes_enc: r.get(5)?, tags_json: r.get(6)?,
+            totp_uri: r.get(7)?, created_at: r.get(8)?, updated_at: r.get(9)?,
+        }))?;
+        rows.collect::<rusqlite::Result<_>>().context("vault_logins_raw")
+    }
+
+    // ── Vault — Cards ─────────────────────────────────────────────────────────
+
+    pub fn vault_card_upsert(&self, r: &VaultCardRaw) -> Result<()> {
+        self.0.lock().unwrap().execute(
+            "INSERT OR REPLACE INTO vault_cards
+             (id,title,cardholder_enc,number_enc,expiry,cvv_enc,notes_enc,tags_json,created_at,updated_at)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+            params![r.id, r.title, r.cardholder_enc, r.number_enc, r.expiry,
+                    r.cvv_enc, r.notes_enc, r.tags_json, r.created_at, r.updated_at],
+        )?;
+        Ok(())
+    }
+
+    pub fn vault_card_delete(&self, id: &str) -> Result<()> {
+        self.0.lock().unwrap().execute("DELETE FROM vault_cards WHERE id=?1", [id])?;
+        Ok(())
+    }
+
+    pub fn vault_cards_raw(&self) -> Result<Vec<VaultCardRaw>> {
+        let conn = self.0.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id,title,cardholder_enc,number_enc,expiry,cvv_enc,notes_enc,tags_json,created_at,updated_at
+             FROM vault_cards ORDER BY updated_at DESC")?;
+        let rows = stmt.query_map([], |r| Ok(VaultCardRaw {
+            id: r.get(0)?, title: r.get(1)?, cardholder_enc: r.get(2)?,
+            number_enc: r.get(3)?, expiry: r.get(4)?,
+            cvv_enc: r.get(5)?, notes_enc: r.get(6)?,
+            tags_json: r.get(7)?, created_at: r.get(8)?, updated_at: r.get(9)?,
+        }))?;
+        rows.collect::<rusqlite::Result<_>>().context("vault_cards_raw")
+    }
+
+    // ── Vault — Notes ─────────────────────────────────────────────────────────
+
+    pub fn vault_note_upsert(&self, r: &VaultNoteRaw) -> Result<()> {
+        self.0.lock().unwrap().execute(
+            "INSERT OR REPLACE INTO vault_notes
+             (id,title,content_enc,tags_json,created_at,updated_at)
+             VALUES(?1,?2,?3,?4,?5,?6)",
+            params![r.id, r.title, r.content_enc, r.tags_json, r.created_at, r.updated_at],
+        )?;
+        Ok(())
+    }
+
+    pub fn vault_note_delete(&self, id: &str) -> Result<()> {
+        self.0.lock().unwrap().execute("DELETE FROM vault_notes WHERE id=?1", [id])?;
+        Ok(())
+    }
+
+    pub fn vault_notes_raw(&self) -> Result<Vec<VaultNoteRaw>> {
+        let conn = self.0.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id,title,content_enc,tags_json,created_at,updated_at
+             FROM vault_notes ORDER BY updated_at DESC")?;
+        let rows = stmt.query_map([], |r| Ok(VaultNoteRaw {
+            id: r.get(0)?, title: r.get(1)?,
+            content_enc: r.get(2)?, tags_json: r.get(3)?,
+            created_at: r.get(4)?, updated_at: r.get(5)?,
+        }))?;
+        rows.collect::<rusqlite::Result<_>>().context("vault_notes_raw")
+    }
+
 }
 
 // ── Row helper ────────────────────────────────────────────────────────────────
@@ -759,6 +959,10 @@ pub struct KnowledgePack {
 pub struct TotpRaw {
     pub id: String, pub issuer: String, pub account: String,
     pub secret_enc: String, pub domains_json: String, pub added_at: i64,
+    /// [NEW-v0.9.5] Optional fields — None when DB row predates v0.9.5.
+    pub algorithm: Option<String>,
+    pub digits: Option<u8>,
+    pub period: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -807,6 +1011,30 @@ pub fn week_start(ts: i64) -> i64 {
     ts - (dow * 86_400) - (ts % 86_400)
 }
 
+
+#[derive(Debug, Clone)]
+pub struct VaultLoginRaw {
+    pub id: String, pub title: String, pub username: String,
+    pub password_enc: String, pub urls_json: String, pub notes_enc: String,
+    pub tags_json: String, pub totp_uri: Option<String>,
+    pub created_at: i64, pub updated_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct VaultCardRaw {
+    pub id: String, pub title: String, pub cardholder_enc: String,
+    pub number_enc: String, pub expiry: String, pub cvv_enc: String,
+    pub notes_enc: String, pub tags_json: String,
+    pub created_at: i64, pub updated_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct VaultNoteRaw {
+    pub id: String, pub title: String,
+    pub content_enc: String, pub tags_json: String,
+    pub created_at: i64, pub updated_at: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -825,5 +1053,126 @@ mod tests {
         let q = "50%_test";
         let esc = q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
         assert_eq!(esc, "50\\%\\_test");
+    }
+}
+
+// ── Tab Groups [NEW v0.9.6] ────────────────────────────────────────────────────
+
+impl Db {
+    /// Upsert a tab group row.
+    pub fn upsert_tab_group(
+        &self,
+        id: &str,
+        workspace_id: &str,
+        name: &str,
+        color: &str,
+        collapsed: bool,
+        project_mode: bool,
+        tab_ids: &[String],
+        created_at: i64,
+    ) -> anyhow::Result<()> {
+        let conn = self.0.lock().unwrap();
+        let tab_ids_json = serde_json::to_string(tab_ids)?;
+        conn.execute(
+            "INSERT INTO tab_groups (id,workspace_id,name,color,collapsed,project_mode,tab_ids,created_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
+             ON CONFLICT(id) DO UPDATE SET
+               name=excluded.name,color=excluded.color,
+               collapsed=excluded.collapsed,project_mode=excluded.project_mode,
+               tab_ids=excluded.tab_ids",
+            rusqlite::params![id,workspace_id,name,color,
+                collapsed as i64,project_mode as i64,tab_ids_json,created_at],
+        )?;
+        Ok(())
+    }
+
+    /// List all groups for a workspace. Returns (id, ws_id, name, color, collapsed, project_mode, tab_ids, created_at).
+    pub fn list_tab_groups(&self, workspace_id: &str) -> anyhow::Result<Vec<(String,String,String,String,bool,bool,Vec<String>,i64)>> {
+        let conn = self.0.lock().unwrap();
+        // Create table if first run (idempotent migration)
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS tab_groups (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL,
+                name TEXT NOT NULL DEFAULT 'Group',
+                color TEXT NOT NULL DEFAULT '#60a5fa',
+                collapsed INTEGER NOT NULL DEFAULT 0,
+                project_mode INTEGER NOT NULL DEFAULT 0,
+                tab_ids TEXT NOT NULL DEFAULT '[]',
+                created_at INTEGER NOT NULL
+            );"
+        ).ok();
+        let mut stmt = conn.prepare(
+            "SELECT id,workspace_id,name,color,collapsed,project_mode,tab_ids,created_at
+             FROM tab_groups WHERE workspace_id=?1 ORDER BY created_at ASC"
+        )?;
+        let rows = stmt.query_map(rusqlite::params![workspace_id], |r| {
+            Ok((
+                r.get::<_,String>(0)?,
+                r.get::<_,String>(1)?,
+                r.get::<_,String>(2)?,
+                r.get::<_,String>(3)?,
+                r.get::<_,i64>(4)? != 0,
+                r.get::<_,i64>(5)? != 0,
+                r.get::<_,String>(6)?,
+                r.get::<_,i64>(7)?,
+            ))
+        })?;
+        rows.map(|r| r.map_err(anyhow::Error::from).and_then(|t| {
+            let tab_ids: Vec<String> = serde_json::from_str(&t.6).unwrap_or_default();
+            Ok((t.0,t.1,t.2,t.3,t.4,t.5,tab_ids,t.7))
+        })).collect()
+    }
+
+    pub fn delete_tab_group(&self, group_id: &str) -> anyhow::Result<()> {
+        let conn = self.0.lock().unwrap();
+        conn.execute("DELETE FROM tab_groups WHERE id=?1", rusqlite::params![group_id])?;
+        Ok(())
+    }
+
+    pub fn rename_tab_group(&self, group_id: &str, name: &str) -> anyhow::Result<()> {
+        let conn = self.0.lock().unwrap();
+        conn.execute("UPDATE tab_groups SET name=?1 WHERE id=?2",
+            rusqlite::params![name, group_id])?;
+        Ok(())
+    }
+
+    pub fn set_tab_group_collapsed(&self, group_id: &str, collapsed: bool) -> anyhow::Result<()> {
+        let conn = self.0.lock().unwrap();
+        conn.execute("UPDATE tab_groups SET collapsed=?1 WHERE id=?2",
+            rusqlite::params![collapsed as i64, group_id])?;
+        Ok(())
+    }
+
+    pub fn set_tab_group_project_mode(&self, group_id: &str, pm: bool) -> anyhow::Result<()> {
+        let conn = self.0.lock().unwrap();
+        conn.execute("UPDATE tab_groups SET project_mode=?1 WHERE id=?2",
+            rusqlite::params![pm as i64, group_id])?;
+        Ok(())
+    }
+
+    pub fn move_tab_to_group(&self, tab_id: &str, group_id: Option<&str>) -> anyhow::Result<()> {
+        let conn = self.0.lock().unwrap();
+        // Remove tab from all groups in this connection
+        let mut stmt = conn.prepare("SELECT id, tab_ids FROM tab_groups")?;
+        let all: Vec<(String, String)> = stmt.query_map([], |r| {
+            Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?))
+        })?.filter_map(|r| r.ok()).collect();
+
+        for (gid, ids_json) in all {
+            let mut ids: Vec<String> = serde_json::from_str(&ids_json).unwrap_or_default();
+            let before = ids.len();
+            ids.retain(|id| id != tab_id);
+            // Add to target group
+            if Some(gid.as_str()) == group_id && !ids.contains(&tab_id.to_owned()) {
+                ids.push(tab_id.to_owned());
+            }
+            if ids.len() != before || Some(gid.as_str()) == group_id {
+                let new_json = serde_json::to_string(&ids).unwrap_or_default();
+                conn.execute("UPDATE tab_groups SET tab_ids=?1 WHERE id=?2",
+                    rusqlite::params![new_json, gid])?;
+            }
+        }
+        Ok(())
     }
 }

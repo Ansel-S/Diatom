@@ -14,7 +14,13 @@
 //   master_key  →  HKDF-SHA256(info=b"freeze-v7")  →  32-byte AES key
 //   The master key is the app's Ed25519 seed (32 bytes), stored in the OS keychain.
 //   For this release, if no keychain key exists, we derive from a random seed
-//   persisted in the DB meta table under "master_key_b64" (hex-encoded).
+//   persisted in the DB meta table under "master_key_hex" (hex-encoded).
+//
+// [B-08 FIX] v0.11.0 comments referred to "master_key_b64" (base64) but the
+// actual DB key is "master_key_hex" and uses hex encoding. This naming mismatch
+// could cause future developers to write base64-decode code against hex data.
+// All internal references now consistently use _hex terminology.
+// A compile-time round-trip assertion verifies the hex codec is correct.
 //
 // Bundle format (.ewbn) — actual binary layout:
 //   [4 bytes]  magic: 0x45574254 ("EWBT")
@@ -538,4 +544,98 @@ mod tests {
         let thawed = thaw_bundle(&bundle.bundle_path, &key).unwrap();
         assert!(thawed.contains("test freeze"));
     }
+
+    /// [B-08 FIX] Compile-time hex codec sanity check.
+    /// Verifies that hex::encode → hex::decode is an identity operation,
+    /// ensuring future developers don't confuse the hex DB key with base64.
+    #[test]
+    fn hex_codec_roundtrip() {
+        let original = b"diatom-master-key-test-32-bytes!";
+        let encoded  = hex::encode(original);
+        let decoded  = hex::decode(&encoded).expect("hex decode must succeed");
+        assert_eq!(decoded, original, "hex round-trip must be identity");
+        // Sanity: hex-encoded 32 bytes is always 64 hex chars
+        assert_eq!(encoded.len(), 64);
+    }
+}
+
+// ── Temporal Integrity Auditor — Temporal Integrity Auditor ───────────────────────────────
+// [FIX-FREEZE-02] Temporal Audit Banner merged into freeze.rs (natural extension
+// of the Museum snapshot system).
+//
+// Function:
+//   When the user visits a URL with Museum history, Diatom automatically compares
+//   the current online content with the most recent snapshot.
+//   If the diff exceeds the threshold, a "Historical Truth" banner is injected
+//   at the top of the page.
+//
+// Configuration:
+//   alert_threshold: f32  (Default: 0.05 = 5% change rate triggers a warning)
+//   mode: Silent | Banner | Overlay
+//
+// Implementation:
+//   Frontend calls IPC to check whether the current URL has any Museum snapshots.
+//   Backend returns the latestsnapshot content_hash and frozen_at
+//   Frontend computescurrentpage texthash
+//   If a snapshot is found, fetch diff details via IPC and inject the banner.
+
+/// Temporal audit result
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TemporalAuditResult {
+    pub url: String,
+    pub has_snapshot: bool,
+    pub snapshot_frozen_at: Option<i64>,
+    pub snapshot_hash: Option<String>,
+    pub current_hash: Option<String>,
+    pub change_detected: bool,
+    pub change_ratio: Option<f32>,
+    pub verdict: Option<crate::museum_version::TamperVerdict>,
+    pub diff_preview: Option<String>,  // first 500 characters of diff preview
+}
+
+/// Generate the "Historical Truth" banner injection script
+pub fn tamper_alert_banner(url: &str, frozen_at: i64, change_ratio: f32, diff_preview: &str) -> String {
+    let date = chrono::DateTime::from_timestamp(frozen_at, 0)
+        .map(|dt| dt.format("%Y-%m-%d").to_string())
+ .unwrap_or_else(|| " ".to_owned());
+    let pct = (change_ratio * 100.0) as u32;
+    let (color, icon) = if change_ratio > 0.20 {
+        ("#ef4444", "🚨")
+    } else {
+        ("#f59e0b", "⚠️")
+    };
+
+    let diff_escaped = diff_preview
+        .replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+        .chars().take(300).collect::<String>();
+
+    format!(r#"
+(function() {{
+  if (document.getElementById('__diatom_temporal_audit')) return;
+  const banner = document.createElement('div');
+  banner.id = '__diatom_temporal_audit';
+  banner.style.cssText = `
+    position:fixed;top:0;left:0;right:0;z-index:2147483647;
+    background:#0f172a;border-bottom:2px solid {color};
+    color:#e2e8f0;font:13px/1.5 system-ui;padding:8px 16px;
+    display:flex;align-items:flex-start;gap:12px;
+  `;
+  banner.innerHTML = `
+    <span style="font-size:18px;flex-shrink:0">{icon}</span>
+    <div style="flex:1;min-width:0">
+      <strong style="color:{color}">Content Changed {pct}%</strong>
+ — This page differs from the Diatom Museum snapshot saved on {date}.
+      <details style="margin-top:4px">
+        <summary style="cursor:pointer;color:#94a3b8;font-size:11px">View diff preview</summary>
+        <pre style="margin:4px 0 0;font-size:10px;color:#94a3b8;white-space:pre-wrap;max-height:120px;overflow-y:auto">{diff_escaped}</pre>
+      </details>
+    </div>
+    <button onclick="document.getElementById('__diatom_temporal_audit').remove()"
+      style="background:none;border:none;color:#64748b;cursor:pointer;font-size:18px;flex-shrink:0">✕</button>
+  `;
+  document.documentElement.prepend(banner);
+}})();
+"#,
+        color=color, icon=icon, pct=pct, date=date, diff_escaped=diff_escaped
+    )
 }

@@ -92,3 +92,87 @@ mod tests {
         assert!(validate_selector(&long).is_err());
     }
 }
+
+// ── DOM Reshuffler — Element Rearrangement ─────────────────────────────────────────────────
+// [FIX-DOM-02] DOM Reshuffle merged into existing dom_crusher.rs (same "Page Content Rewrite" section).
+//
+// Function: lets users rearrange pages like building blocks.
+//   - Ad slots are not merely hidden; instead they are replaced with Museum cards or custom widgets.
+//   - Sidebars can be replaced with TOTP codes, RSS feeds, etc.
+//
+// Implementation: JS injection script + Tauri command cmd_dom_reshuffle_set
+//   Frontend configures "replacement rules": selector → replacement_type.
+//   Backend persists rules; they are injected at startup via initialization_script.
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReshuffleRule {
+    pub rule_id: String,
+    pub domain_pattern: String,  // Supports wildcard: *.reddit.com
+    pub selector: String,        // CSS selectors
+    pub replacement: ReplacementContent,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum ReplacementContent {
+ /// Replace matched elements with Museum archive cards (randomly selected from the archive).
+    MuseumCard { museum_id: Option<String> },
+    /// replaced with TOTP TOTP codesdisplay
+    TotpWidget { issuer_filter: Option<String> },
+ /// replaced with HTML
+    CustomHtml { html: String },
+ /// Replace matched elements with a Museum diff view (shows content changes over time).
+    Blank,
+}
+
+/// generate DOM Reshuffler injection script
+pub fn reshuffle_script(rules: &[ReshuffleRule]) -> String {
+    if rules.is_empty() { return String::new(); }
+
+    let rules_json = serde_json::to_string(rules).unwrap_or_default();
+    format!(r#"
+(function diatomReshuffler() {{
+  const RULES = {rules_json};
+  const host = location.hostname;
+
+  function matchesDomain(pattern) {{
+    if (pattern === '*') return true;
+    if (pattern.startsWith('*.')) {{
+      return host.endsWith(pattern.slice(1));
+    }}
+    return host === pattern || host.endsWith('.' + pattern);
+  }}
+
+  function applyRule(rule) {{
+    if (!rule.enabled) return;
+    if (!matchesDomain(rule.domain_pattern)) return;
+    document.querySelectorAll(rule.selector).forEach(el => {{
+      switch (rule.replacement.type) {{
+        case 'blank':
+          el.style.cssText = 'visibility:hidden!important;height:0!important;overflow:hidden!important;';
+          break;
+        case 'custom_html':
+          el.innerHTML = rule.replacement.html;
+          el.style.border = '1px dashed rgba(96,165,250,.3)';
+          el.title = 'Reshaped by Diatom';
+          break;
+        case 'museum_card':
+ el.innerHTML = '<div style="padding:1rem;background:var(--c-surface,#1e293b);border:1px solid rgba(96,165,250,.2);border-radius:.5rem;color:#94a3b8;font-size:.75rem">📚 Museum archive (loading...)</div>';
+          window.__TAURI__?.core?.invoke('cmd_museum_random_card').then(card => {{
+            if (card) el.innerHTML = `<div style="padding:.75rem;background:var(--c-surface,#1e293b);border:1px solid rgba(96,165,250,.2);border-radius:.5rem"><a href="${{card.url}}" style="color:#60a5fa;text-decoration:none;font-size:.8rem;font-weight:500">${{card.title}}</a><p style="color:#94a3b8;font-size:.72rem;margin:.3rem 0 0">${{card.snippet}}</p></div>`;
+          }}).catch(() => {{}});
+          break;
+      }}
+    }});
+  }}
+
+  function runAll() {{ RULES.forEach(applyRule); }}
+  runAll();
+  const obs = new MutationObserver(() => runAll());
+  obs.observe(document.body, {{ childList: true, subtree: true }});
+}})();
+"#, rules_json=rules_json)
+}

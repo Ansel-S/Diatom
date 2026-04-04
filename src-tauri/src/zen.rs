@@ -139,3 +139,86 @@ impl ZenConfig {
         let _ = db.zen_save(self.is_active(), &self.aphorism, &cats, self.activated_at);
     }
 }
+
+// ── Digital Zen Garden — emotional loadFilter ──────────────────────────────────────
+// [FIX-ZEN-02] Emotion Filter merged into the existing Zen module (same "Focus & Calm"
+// section — no standalone module needed).
+//
+// Function: real-time detection of the "emotional load" of web content.
+//   - If a news site is full of inflammatory language, Diatom attenuates or blurs the text
+//   - or converts high-emotion content to a calm Mermaid logical outline (via local SLM)
+//
+// Implementation:
+//   - Frontend: vocabulary emotion scan using a simplified AFINN word list; computes emotion score
+//   - Backend: provides the word list + configuration; frontend JS performs the actual filtering
+//   - Filter intensity: Subtle | Moderate | Heavy
+
+/// Emotion filterintensity
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum EmotionFilterStrength {
+    /// slightly desaturate high-emotion words
+    Subtle,
+ /// blur high-emotion words + compute diff betweendiff
+    Moderate,
+ /// Routes content through the emotion filter (requires local SLM).
+    Heavy,
+}
+
+impl Default for EmotionFilterStrength {
+    fn default() -> Self { Self::Subtle }
+}
+
+/// generateEmotion filter JS injection script
+pub fn emotion_filter_script(strength: &EmotionFilterStrength) -> String {
+    let opacity = match strength {
+        EmotionFilterStrength::Subtle   => "0.75",
+        EmotionFilterStrength::Moderate => "0.50",
+        EmotionFilterStrength::Heavy    => "0.30",
+    };
+    let blur = match strength {
+        EmotionFilterStrength::Subtle   => "0px",
+        EmotionFilterStrength::Moderate => "0.8px",
+        EmotionFilterStrength::Heavy    => "1.5px",
+    };
+
+    // Simplified AFINN negative high-emotion words (common in inflammatory news)
+    format!(r#"
+(function diatomEmotionFilter() {{
+  const HIGH_EMOTION_WORDS = [
+    'outrage','furious','rage','shock','horrifying','devastating','catastrophic',
+    'explosive','bombshell','breaking','urgent','crisis','chaos','panic',
+    'scandal','disaster','collapse','attack','threat','danger','alarming',
+ ' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',
+ ' ',' ',' ',' ',' ',
+  ];
+
+  function emotionScore(text) {{
+    const lower = text.toLowerCase();
+    return HIGH_EMOTION_WORDS.filter(w => lower.includes(w)).length;
+  }}
+
+  function applyFilter(el) {{
+    const score = emotionScore(el.textContent || '');
+    if (score >= 2) {{
+      el.style.opacity = '{opacity}';
+      el.style.filter = 'blur({blur}) saturate(0.6)';
+      el.title = `[Diatom Zen: emotional load ${{score}}]`;
+    }}
+  }}
+
+ // and 
+  document.querySelectorAll('p, h1, h2, h3, article, .headline, .title').forEach(applyFilter);
+
+ // their Museum
+  const observer = new MutationObserver(mutations => {{
+    for (const m of mutations) {{
+      for (const node of m.addedNodes) {{
+        if (node.nodeType === 1) applyFilter(node);
+      }}
+    }}
+  }});
+  observer.observe(document.body, {{ childList: true, subtree: true }});
+}})();
+"#, opacity=opacity, blur=blur)
+}

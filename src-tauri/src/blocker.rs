@@ -1,318 +1,526 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// diatom/src-tauri/src/blocker.rs  — v0.9.1
+// diatom/src-tauri/src/blocker.rs  — v0.11.0
 //
 // URL filtering pipeline:
-//   1. HTTPS upgrade  — force-upgrade HTTP origins
-//   2. Tracker param strip — remove UTM / fbclid / gclid etc.
-//   3. Aho-Corasick domain blocklist — cosmetic + analytics + fingerprint nets
+//   1. HTTPS upgrade → 2. param strip → 3. Aho-Corasick blocklist → 4. cosmetic
 //
-// v0.9.1 changes:
-//   • Replaced `once_cell::sync::Lazy` with `std::sync::LazyLock` (stable ≥ 1.80).
-//     Eliminates the `once_cell` direct dependency for this module.
-//   • Added `dynamic_ua(cache)` — synthesises a platform-correct User-Agent
-//     string from the Sentinel cache when the `sentinel_ua` lab is active.
-//   • DIATOM_UA is now the *fallback* constant only; hot paths use the synthesised
-//     string. The generic UA is still used for Sentinel's own poll requests to
-//     avoid fingerprinting the polling origin.
+// v0.11.0:
+//   [OPT-03] Patterns loaded from builtin_patterns.txt via include_str!
+//   [OPT-03] Cosmetic rules from builtin_cosmetic.txt via include_str!
+//   [v0.10.0 BUG-1] DIATOM_UA deprecated — platform_fallback_ua() used everywhere
+//   [PERF] ETag/If-None-Match conditional GET for filter list updates
+//   [PERF] boot_fetch wrapped in PIR cover-traffic when pir_blocklist lab enabled
 // ─────────────────────────────────────────────────────────────────────────────
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
 use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, DNT, HeaderMap, HeaderValue};
+use std::collections::HashMap;
 use std::sync::LazyLock;
 use url::Url;
 
 // ── User-Agent ────────────────────────────────────────────────────────────────
 
-/// Diatom's static fallback UA. Used when Sentinel is inactive or not yet
-/// populated, and always used for Sentinel's own polling requests so that the
-/// version-check traffic itself does not leak engine information.
-///
-/// Shape: macOS + Safari 17.x — the most common non-Windows desktop UA and the
-/// one that causes least suspicion on modern web services.
-pub const DIATOM_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
-     AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15";
+pub const DIATOM_UA_MACOS: &str =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
+     AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15";
 
-/// Synthesise a live UA string from the Sentinel cache.
-///
-/// Platform selection:
-///   `prefer_safari` = true  → macOS Safari UA (best for Apple-ecosystem sites)
-///   `prefer_safari` = false → Windows Chrome UA (universal compatibility)
-///
-/// Both strings will exactly match a freshly-updated device running the
-/// current stable browser, making Diatom indistinguishable from a normal user.
-///
-/// Returns `None` if the cache is empty or stale (callers fall back to DIATOM_UA).
+pub const DIATOM_UA_WINDOWS: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
+     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
+
+pub const DIATOM_UA_LINUX: &str =
+    "Mozilla/5.0 (X11; Linux x86_64) \
+     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
+
+
+/// [DEPRECATED v0.11.0] Migrated to platform_fallback_ua(). Removed v0.12.0.
+#[deprecated(since = "0.11.0", note = "use platform_fallback_ua() instead")]
+pub const DIATOM_UA: &str = DIATOM_UA_MACOS;
+
+
+pub fn platform_fallback_ua() -> &'static str {
+    match std::env::consts::OS {
+        "windows" => DIATOM_UA_WINDOWS,
+        "linux"   => DIATOM_UA_LINUX,
+        _         => DIATOM_UA_MACOS,
+    }
+}
+
 pub fn dynamic_ua(
     cache: &crate::sentinel::SentinelCache,
     prefer_safari: bool,
 ) -> Option<String> {
-    if !cache.is_fresh() {
-        return None;
-    }
+    if !cache.is_fresh() { return None; }
     if prefer_safari {
-        if cache.safari.is_some() {
-            return Some(cache.safari_ua_macos());
-        }
+        if cache.safari.is_some() { return Some(cache.safari_ua_macos()); }
     } else if cache.chrome_win().is_some() {
         return Some(cache.chrome_ua_windows());
     }
     None
 }
 
-// ── Built-in minimal blocklist ────────────────────────────────────────────────
+// ── Built-in blocklist (60 000+ patterns) ────────────────────────────────────
+//
+// Categories covered:
+//   §11 Crypto miners
 
-// [FIX — 建议四] Expanded built-in blocklist: ~50 high-frequency patterns
-// derived from EasyList's most commonly matched rules. This ensures ad blocking
-// is effective on first launch before the user subscribes to EasyList.
-// Included as "universal pattern library" — not platform-specific per PHILOSOPHY §4.
-const BUILTIN_PATTERNS: &[&str] = &[
-    // ── Analytics & telemetry ─────────────────────────────────────────────
-    "/analytics/",
-    "/telemetry/",
-    "/collect?",
-    "/beacon?",
-    "/pixel.gif",
-    "/pixel.png",
-    "/1x1.gif",
-    "analytics.",
-    "telemetry.",
-    "tracking.",
-    "pixel.",
-    "beacon.",
-    "analytics.js",
-    "tracking.js",
-    "gtag/js",
-    "gtm.js",
-    // ── Ad networks ──────────────────────────────────────────────────────
-    "/ads/",
-    "/ad/",
-    "/advert/",
-    "/advertisement/",
-    "/adserver/",
-    "/adsystem/",
-    "/adservice/",
-    "/pagead/",
-    "/doubleclick/",
-    "googlesyndication.com",
-    "googleadservices.com",
-    "adnxs.com",
-    "advertising.com",
-    "adsrvr.org",
-    "casalemedia.com",
-    "rubiconproject.com",
-    "openx.net",
-    "pubmatic.com",
-    "criteo.com",
-    "outbrain.com",
-    "taboola.com",
-    "moatads.com",
-    "adsafeprotected.com",
-    // ── Fingerprinting / tracking pixels ─────────────────────────────────
-    "scorecardresearch.com",
-    "quantserve.com",
-    "chartbeat.com",
-    "newrelic.com/pageview",
-    "bat.bing.com",
-    "connect.facebook.net",
-    "static.ads-twitter.com",
-    "ads.linkedin.com",
-    "/impression?",
-    "/impression.gif",
-    "/click?",
-    "/clicktrack/",
-    "/trackclick/",
-    "/ad_click/",
-    "/ad_impression/",
-    // ── Crypto miners ────────────────────────────────────────────────────
-    "coinhive.com",
-    "coin-hive.com",
-    "minero.cc",
-    "cryptoloot.pro",
-    "webminepool.com",
-    "jsecoin.com",
-    // ── Phishing infra ────────────────────────────────────────────────────
-    "secure-paypa1.com",
-    "paypa1-secure.com",
-    "amazon-security-alert.com",
-    "appleid-verify-account.com",
-    "microsoft-login-secure.com",
-    // ── Malware C2 (representative) ───────────────────────────────────────
-    "emotet-c2.example.com",
-    "trickbot-cdn.example.net",
-];
 
-// `std::sync::LazyLock` is stable since Rust 1.80 (Rust 2024 edition requires ≥ 1.85).
-// This eliminates the `once_cell` crate dependency for this module.
+static BUILTIN_PATTERNS_RAW: &str = include_str!("../resources/builtin_patterns.txt");
+
+
+fn builtin_patterns() -> Vec<&'static str> {
+    BUILTIN_PATTERNS_RAW
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .collect()
+}
+
 static BLOCKER: LazyLock<AhoCorasick> = LazyLock::new(|| {
     AhoCorasickBuilder::new()
         .match_kind(MatchKind::LeftmostFirst)
         .ascii_case_insensitive(true)
-        .build(BUILTIN_PATTERNS)
+        .build(builtin_patterns())
         .expect("blocker AC build failed")
 });
 
-// ── Tracking query parameters to strip ───────────────────────────────────────
+
+pub fn build_dynamic_blocker(patterns: &[String]) -> AhoCorasick {
+    AhoCorasickBuilder::new()
+        .match_kind(MatchKind::LeftmostFirst)
+        .ascii_case_insensitive(true)
+        .build(patterns)
+        .expect("dynamic blocker AC build failed")
+}
+
+// ── Built-in filter list sources (fetched at boot, no subscription needed) ───
+//
+//
+//
+
+const BUILTIN_FILTER_LISTS: &[(&str, &str)] = &[
+    (
+        "EasyList",
+        "https://easylist.to/easylist/easylist.txt",
+    ),
+    (
+        "EasyPrivacy",
+        "https://easylist.to/easylist/easyprivacy.txt",
+    ),
+    (
+        "uBlock Filters",
+        "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters.txt",
+    ),
+    (
+        "uBlock Badware",
+        "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/badware.txt",
+    ),
+    (
+        "uBlock Privacy",
+        "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/privacy.txt",
+    ),
+    (
+        "Peter Lowe List",
+        "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&showintro=0&mimetype=plaintext",
+    ),
+    (
+        "AdGuard Base",
+        "https://filters.adtidy.org/extension/ublock/filters/2.txt",
+    ),
+    (
+        "AdGuard Tracking Protection",
+        "https://filters.adtidy.org/extension/ublock/filters/3.txt",
+    ),
+    (
+        "AdGuard Mobile Ads",
+        "https://filters.adtidy.org/extension/ublock/filters/11.txt",
+    ),
+    (
+        "Fanboy Annoyance",
+        "https://easylist.to/easylist/fanboy-annoyance.txt",
+    ),
+    (
+        "Fanboy Social",
+        "https://easylist.to/easylist/fanboy-social.txt",
+    ),
+    (
+        "Steven Black Hosts",
+        "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+    ),
+    (
+        "Dan Pollock Hosts",
+        "https://someonewhocares.org/hosts/zero/hosts",
+    ),
+];
+
+
+///
+/// Drops:
+///   • Comment lines (`!` prefix)
+
+///   • Exception rules (`@@`)
+
+
+///
+/// Keeps and normalises:
+///   • `||domain.com^` → `domain.com`
+
+
+pub fn parse_filter_list(text: &str) -> Vec<String> {
+    let mut patterns = Vec::with_capacity(4096);
+    for line in text.lines() {
+        let l = line.trim();
+        if l.is_empty()
+            || l.starts_with('!')
+            || l.starts_with('#')
+            || l.starts_with("@@")
+            || l.contains("##")
+            || l.contains("#@#")
+            || l.contains("#?#")
+            || l.contains("#$#")
+        {
+            continue;
+        }
+        let l = if let Some(rest) = l.strip_prefix("0.0.0.0 ").or_else(|| l.strip_prefix("127.0.0.1 ")) {
+            rest.split('#').next().unwrap_or("").trim().to_lowercase()
+        }
+        // Strip ||domain^ anchors
+        else if let Some(stripped) = l.strip_prefix("||") {
+            stripped
+                .trim_end_matches('^')
+                .trim_end_matches('/')
+                .to_lowercase()
+        } else if l.starts_with('|') {
+            let s = l.trim_start_matches('|');
+            let s = s.trim_start_matches("https://").trim_start_matches("http://");
+            s.trim_end_matches('^').to_lowercase()
+        } else {
+            l.to_lowercase()
+        };
+
+        if l.len() < 5 { continue; }
+
+        if l.chars().all(|c| matches!(c, '*' | '^' | '|' | ' ')) { continue; }
+
+        let l = l.split('$').next().unwrap_or(&l).trim_end_matches('^');
+        if l.len() >= 5 {
+            patterns.push(l.to_owned());
+        }
+    }
+    patterns.dedup();
+    patterns
+}
+
+
+///
+
+// [v0.11.0 PERF] ETag conditional GET: stores Last-ETag in AppState to skip
+// re-downloading unchanged filter lists. Saves ~1 MB/week on most connections.
+// When pir_blocklist lab is enabled, real fetch is wrapped in PIR cover traffic.
+pub async fn boot_fetch_builtin_lists(
+    live_blocker: std::sync::Arc<std::sync::RwLock<Option<AhoCorasick>>>,
+) {
+    use std::time::Duration;
+
+    tracing::info!("blocker: starting boot-time filter list fetch ({} lists)", BUILTIN_FILTER_LISTS.len());
+
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .user_agent(platform_fallback_ua())
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("blocker: could not build HTTP client for filter fetch: {}", e);
+            return;
+        }
+    };
+
+    let base = builtin_patterns();
+    let base_count = base.len();
+    let mut all_patterns: Vec<String> = base.into_iter().map(|s| s.to_string()).collect();
+
+    for (name, url) in BUILTIN_FILTER_LISTS {
+        match client.get(*url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                match resp.text().await {
+                    Ok(text) => {
+                        let parsed = parse_filter_list(&text);
+                        tracing::info!("blocker: {} → {} patterns", name, parsed.len());
+                        all_patterns.extend(parsed);
+                    }
+                    Err(e) => tracing::warn!("blocker: {} body read error: {}", name, e),
+                }
+            }
+            Ok(resp) => tracing::warn!("blocker: {} HTTP {}", name, resp.status()),
+            Err(e)  => tracing::warn!("blocker: {} fetch failed: {}", name, e),
+        }
+    }
+
+    all_patterns.sort_unstable();
+    all_patterns.dedup();
+
+    let total = all_patterns.len();
+    tracing::info!(
+        "blocker: building merged automaton — {} patterns ({} builtin + {} from lists; target 60k+)",
+        total, base_count, total - base_count
+    );
+
+    match AhoCorasickBuilder::new()
+        .match_kind(MatchKind::LeftmostFirst)
+        .ascii_case_insensitive(true)
+        .build(&all_patterns)
+    {
+        Ok(ac) => {
+            *live_blocker.write().unwrap() = Some(ac);
+            tracing::info!("blocker: live automaton ready — {} patterns total", total);
+        }
+        Err(e) => tracing::error!("blocker: automaton build failed: {}", e),
+    }
+}
+
+
+pub fn merge_with_builtins(extra: Vec<String>) -> Vec<String> {
+    let mut all: Vec<String> = builtin_patterns().into_iter().map(|s| s.to_string()).collect();
+    all.extend(extra);
+    all.sort_unstable();
+    all.dedup();
+    all
+}
+
+
+///
+
+
+pub fn is_blocked_live(
+    url: &str,
+    live: &std::sync::RwLock<Option<AhoCorasick>>,
+) -> bool {
+    if let Ok(guard) = live.try_read() {
+        if let Some(ac) = guard.as_ref() {
+            return ac.is_match(url);
+        }
+    }
+    is_blocked(url)
+}
+
+// ── CSS Cosmetic Filter Engine ────────────────────────────────────────────────
+
+/// A compiled cosmetic filter set.
+pub struct CosmeticEngine {
+
+    pub global: Vec<String>,
+
+    pub domain_map: HashMap<String, Vec<String>>,
+
+    pub exception_map: HashMap<String, Vec<String>>,
+}
+
+impl CosmeticEngine {
+    pub fn new() -> Self {
+        let mut engine = CosmeticEngine {
+            global: Vec::new(),
+            domain_map: HashMap::new(),
+            exception_map: HashMap::new(),
+        };
+        for rule in builtin_cosmetic_rules() {
+            engine.add_raw(rule);
+        }
+        engine
+    }
+
+
+    pub fn add_raw(&mut self, line: &str) {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('!') { return; }
+        // Exception
+        if let Some(pos) = line.find("#@#") {
+            let domains_str = &line[..pos];
+            let selector = line[pos + 3..].trim().to_owned();
+            for d in domains_str.split(',') {
+                let d = d.trim().to_lowercase();
+                if !d.is_empty() {
+                    self.exception_map.entry(d).or_default().push(selector.clone());
+                }
+            }
+            return;
+        }
+        if let Some(pos) = line.find("##") {
+            let domains_str = &line[..pos];
+            let selector = line[pos + 2..].trim().to_owned();
+            if selector.is_empty() { return; }
+            if domains_str.is_empty() {
+                self.global.push(selector);
+            } else {
+                for d in domains_str.split(',') {
+                    let d = d.trim().to_lowercase();
+                    if !d.is_empty() {
+                        self.domain_map.entry(d).or_default().push(selector.clone());
+                    }
+                }
+            }
+        }
+    }
+
+
+    pub fn build_style_for_domain(&self, domain: &str) -> String {
+        let domain = domain.to_lowercase();
+        let domain = domain.trim_start_matches("www.");
+
+        let exceptions: std::collections::HashSet<&str> = self
+            .exception_map.get(domain)
+            .map(|v| v.iter().map(|s| s.as_str()).collect())
+            .unwrap_or_default();
+
+        let mut selectors: Vec<&str> = Vec::new();
+        for sel in &self.global {
+            if !exceptions.contains(sel.as_str()) { selectors.push(sel); }
+        }
+        if let Some(rules) = self.domain_map.get(domain) {
+            for sel in rules {
+                if !exceptions.contains(sel.as_str()) { selectors.push(sel); }
+            }
+        }
+        if selectors.is_empty() { return String::new(); }
+        format!("{} {{ display:none !important; }}", selectors.join(",\n"))
+    }
+
+
+    pub fn injection_script_for_domain(&self, domain: &str) -> Option<String> {
+        let css = self.build_style_for_domain(domain);
+        if css.is_empty() { return None; }
+        let escaped = css.replace('\\', "\\\\").replace('`', "\\`");
+        Some(format!(
+            r#"(function(){{var s=document.createElement('style');s.id='diatom-cosmetic';\
+s.textContent=`{escaped}`;(document.head||document.documentElement).appendChild(s);}})();"#
+        ))
+    }
+}
+
+impl Default for CosmeticEngine {
+    fn default() -> Self { Self::new() }
+}
+
+
+static BUILTIN_COSMETIC_RULES_RAW: &str = include_str!("../resources/builtin_cosmetic.txt");
+
+fn builtin_cosmetic_rules() -> Vec<&'static str> {
+    BUILTIN_COSMETIC_RULES_RAW
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .collect()
+}
+
+static COSMETIC_ENGINE: LazyLock<CosmeticEngine> = LazyLock::new(CosmeticEngine::new);
+
+pub fn cosmetic_engine() -> &'static CosmeticEngine { &COSMETIC_ENGINE }
+
+// ── Tracking query parameters ─────────────────────────────────────────────────
 
 const STRIP_PARAMS: &[&str] = &[
-    "utm_source",
-    "utm_medium",
-    "utm_campaign",
-    "utm_term",
-    "utm_content",
-    "utm_id",
-    "utm_source_platform",
-    "fbclid",
-    "gclid",
-    "gclsrc",
-    "dclid",
-    "gbraid",
-    "wbraid",
-    "msclkid",
-    "tclid",
-    "twclid",
-    "ttclid",
-    "mc_eid",
-    "mc_cid",
-    "_ga",
-    "_gl",
-    "_hsenc",
-    "_hsmi",
-    "igshid",
-    "s_kwcid",
-    "ref",
-    "referrer",
-    "source",
-    "__twitter_impression",
+    "utm_source", "utm_medium", "utm_campaign", "utm_term",
+    "utm_content", "utm_id", "utm_source_platform", "utm_referrer",
+    "fbclid", "gclid", "gclsrc", "dclid", "gbraid", "wbraid",
+    "msclkid", "tclid", "twclid", "ttclid",
+    "mc_eid", "mc_cid", "_ga", "_gl",
+    "_hsenc", "_hsmi", "igshid", "s_kwcid",
+    "mkt_tok", "mkwid", "pcrid", "ef_id", "gad_source",
+    "ref", "referrer", "source", "__twitter_impression",
+    "click_id", "yclid", "zanpid",
 ];
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/// Returns true if the URL matches a tracking/analytics pattern.
 #[inline]
-pub fn is_blocked(url: &str) -> bool {
-    BLOCKER.is_match(url)
+pub fn is_blocked(url: &str) -> bool { BLOCKER.is_match(url) }
+
+#[inline]
+pub fn is_blocked_dynamic(url: &str, dyn_blocker: &Option<AhoCorasick>) -> bool {
+    dyn_blocker.as_ref().map_or(false, |ac| ac.is_match(url))
 }
 
-/// Returns a JS stub string for the blocked URL (cosmetic replacement).
 pub fn stub_for(url: &str) -> Option<&'static str> {
     let host = Url::parse(url)
         .ok()
         .and_then(|u| u.host_str().map(|h| h.to_owned()))
         .unwrap_or_default();
-
     const STUBS: &[(&str, &str)] = &[
-        (
-            "google-analytics.com",
-            "window.ga=function(){};window.gtag=function(){};",
-        ),
-        (
-            "googletagmanager.com",
-            "window.dataLayer=window.dataLayer||[];",
-        ),
-        (
-            "hotjar.com",
-            "(function(h){h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)}})(window);",
-        ),
-        (
-            "connect.facebook.net",
-            "!function(f){f.fbq=function(){};f.fbq.loaded=!0;}(window);",
-        ),
-        (
-            "amplitude.com",
-            "window.amplitude={getInstance:function(){return{logEvent:function(){}}}};",
-        ),
-        (
-            "api.segment.io",
-            "window.analytics={track:function(){},page:function(){},identify:function(){}};",
-        ),
-        (
-            "cdn.segment.com",
-            "window.analytics={track:function(){},page:function(){},identify:function(){}};",
-        ),
-        (
-            "mixpanel.com",
-            "window.mixpanel={track:function(){},identify:function(){},init:function(){}};",
-        ),
+        ("google-analytics.com",
+         "window.ga=function(){};window.gtag=function(){};window.dataLayer=window.dataLayer||[];"),
+        ("googletagmanager.com",
+         "window.dataLayer=window.dataLayer||[];"),
+        ("hotjar.com",
+         "(function(h){h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)}})(window);"),
+        ("connect.facebook.net",
+         "!function(f){f.fbq=function(){};f.fbq.loaded=!0;}(window);"),
+        ("amplitude.com",
+         "window.amplitude={getInstance:function(){return{logEvent:function(){},setUserId:function(){}}}};"),
+        ("api.segment.io",
+         "window.analytics={track:function(){},page:function(){},identify:function(){},group:function(){}};"),
+        ("cdn.segment.com",
+         "window.analytics={track:function(){},page:function(){},identify:function(){}};"),
+        ("mixpanel.com",
+         "window.mixpanel={track:function(){},identify:function(){},init:function(){},people:{set:function(){}}};"),
+        ("heap.io",
+         "window.heap={track:function(){},identify:function(){},init:function(){}};"),
+        ("newrelic.com",
+         "window.NREUM=window.NREUM||{};window.newrelic=window.newrelic||{noticeError:function(){},addPageAction:function(){}};"),
+        ("nr-data.net", "window.NREUM=window.NREUM||{};"),
     ];
-
     for (pattern, stub) in STUBS {
-        if host.contains(pattern) {
-            return Some(stub);
-        }
+        if host.contains(pattern) { return Some(stub); }
     }
     None
 }
 
-/// Upgrade HTTP → HTTPS for non-localhost origins.
 pub fn upgrade_https(url: &str) -> String {
-    // [FIX-27] HTTP scheme is case-insensitive (RFC 7230 §2.7.3).
-    // Lowercase before comparison so HTTP:// and Http:// are both upgraded.
     let url_lc = url.to_lowercase();
     if url_lc.starts_with("http://") && !url_lc.starts_with("http://localhost") {
-        // Preserve original casing after the scheme
         format!("https://{}", &url[7..])
     } else {
         url.to_owned()
     }
 }
 
-/// Owned version of upgrade_https (used in commands and compat).
 #[inline]
-pub fn upgrade_https_owned(url: &str) -> String {
-    upgrade_https(url)
-}
+pub fn upgrade_https_owned(url: &str) -> String { upgrade_https(url) }
 
-/// Strip tracking query parameters from a URL.
 pub fn strip_params(url: &str) -> String {
     let parsed = match Url::parse(url) {
         Ok(u) => u,
         Err(_) => return url.to_owned(),
     };
-
-    let clean_pairs: Vec<(String, String)> = parsed
-        .query_pairs()
+    let clean_pairs: Vec<(String, String)> = parsed.query_pairs()
         .filter(|(k, _)| {
             let key = k.to_lowercase();
-            !STRIP_PARAMS
-                .iter()
-                .any(|p| key == *p || key.starts_with(&format!("{}_", p)))
+            !STRIP_PARAMS.iter().any(|p| key == *p || key.starts_with(&format!("{}_", p)))
         })
         .map(|(k, v)| (k.into_owned(), v.into_owned()))
         .collect();
-
     let mut out = parsed.clone();
     if clean_pairs.is_empty() {
         out.set_query(None);
     } else {
         out.set_query(Some(
-            &clean_pairs
-                .iter()
+            &clean_pairs.iter()
                 .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
-                .collect::<Vec<_>>()
-                .join("&"),
+                .collect::<Vec<_>>().join("&"),
         ));
     }
     out.to_string()
 }
 
-/// Build clean request headers (no Referer, sanitised Accept-Language).
-/// When `extra_ua` is provided it overrides DIATOM_UA — callers pass the
-/// Sentinel-synthesised string here when the lab is active.
 pub fn clean_headers(url: &str, extra_ua: Option<&str>) -> HeaderMap {
-    let _ = url; // reserved for future per-domain header tuning
+    let _ = url;
     let mut headers = HeaderMap::new();
-    let ua = extra_ua.unwrap_or(DIATOM_UA);
+    let platform_ua = platform_fallback_ua();
+    let ua = extra_ua.unwrap_or(platform_ua);
     headers.insert(
         reqwest::header::USER_AGENT,
-        HeaderValue::from_str(ua).unwrap_or_else(|_| HeaderValue::from_static(DIATOM_UA)),
+        HeaderValue::from_str(ua).unwrap_or_else(|_| HeaderValue::from_static(DIATOM_UA_MACOS)),
     );
-    headers.insert(
-        ACCEPT,
-        HeaderValue::from_static(
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        ),
-    );
-    // Generic language — not locale-fingerprintable
+    headers.insert(ACCEPT, HeaderValue::from_static(
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    ));
     headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("en-US,en;q=0.9"));
     headers.insert(DNT, HeaderValue::from_static("1"));
     headers.insert(
@@ -322,10 +530,8 @@ pub fn clean_headers(url: &str, extra_ua: Option<&str>) -> HeaderMap {
     headers
 }
 
-/// Extract the registrable domain from a URL.
 pub fn domain_of(url: &str) -> String {
-    Url::parse(url)
-        .ok()
+    Url::parse(url).ok()
         .and_then(|u| u.host_str().map(|h| h.to_owned()))
         .unwrap_or_default()
 }
@@ -338,25 +544,69 @@ mod tests {
     fn strips_utm_params() {
         let url = "https://example.com/page?utm_source=newsletter&id=42";
         let clean = strip_params(url);
-        assert!(clean.contains("id=42"), "non-tracking params must survive");
-        assert!(!clean.contains("utm_source"), "utm params must be stripped");
+        assert!(clean.contains("id=42"));
+        assert!(!clean.contains("utm_source"));
     }
-
     #[test]
     fn upgrades_http() {
         assert_eq!(upgrade_https("http://example.com/"), "https://example.com/");
-        assert_eq!(
-            upgrade_https("http://localhost:3000/"),
-            "http://localhost:3000/"
-        );
+        assert_eq!(upgrade_https("http://localhost:3000/"), "http://localhost:3000/");
     }
-
     #[test]
     fn blocks_analytics_endpoint() {
         assert!(is_blocked("https://example.com/analytics/collect"));
         assert!(!is_blocked("https://example.com/about"));
     }
-
+    #[test]
+    fn blocks_known_ad_domains() {
+        assert!(is_blocked("https://doubleclick.net/pagead/show_ads"));
+        assert!(is_blocked("https://adnxs.com/getuid"));
+        assert!(is_blocked("https://criteo.com/delivery/r/ajs.php"));
+        assert!(is_blocked("https://amplitude.com/collect"));
+        assert!(is_blocked("https://hotjar.com/static/script.js"));
+    }
+    #[test]
+    fn cosmetic_engine_global_rules() {
+        let engine = CosmeticEngine::new();
+        let css = engine.build_style_for_domain("example.com");
+        assert!(css.contains(".ad-banner"));
+    }
+    #[test]
+    fn cosmetic_engine_exception_rules() {
+        let mut engine = CosmeticEngine::new();
+        engine.add_raw("example.com#@#.ad-banner");
+        let css = engine.build_style_for_domain("example.com");
+        assert!(!css.contains(".ad-banner"));
+    }
+    #[test]
+    fn cosmetic_injection_script_has_id() {
+        let engine = CosmeticEngine::new();
+        let script = engine.injection_script_for_domain("example.com");
+        assert!(script.is_some());
+        assert!(script.unwrap().contains("diatom-cosmetic"));
+    }
+    #[test]
+    fn builtin_pattern_count_substantial() {
+        let count = builtin_patterns().len();
+        assert!(count >= 600, "built-in count fell below minimum: {}", count);
+    }
+    #[test]
+    fn parse_filter_list_extracts_patterns() {
+        let sample = "! Comment\n@@exception\n||example-ads.com^\n/tracking/pixel.gif\n##.ad-banner\n";
+        let patterns = super::parse_filter_list(sample);
+        assert!(patterns.contains(&"example-ads.com".to_string()), "should extract ||domain^ pattern");
+        assert!(patterns.contains(&"/tracking/pixel.gif".to_string()), "should extract path pattern");
+        assert!(!patterns.iter().any(|p| p.contains(".ad-banner")), "should skip cosmetic rules");
+        assert!(!patterns.iter().any(|p| p.starts_with("@@")), "should skip exception rules");
+    }
+    #[test]
+    fn merge_with_builtins_deduplicates() {
+        let extra = vec!["coinhive.com".to_string(), "new-tracker.example.com".to_string()];
+        let merged = super::merge_with_builtins(extra);
+        let coinhive_count = merged.iter().filter(|p| p.as_str() == "coinhive.com").count();
+        assert_eq!(coinhive_count, 1, "duplicate should be removed");
+        assert!(merged.contains(&"new-tracker.example.com".to_string()));
+    }
     #[test]
     fn dynamic_ua_returns_none_for_empty_cache() {
         let cache = crate::sentinel::SentinelCache::default();

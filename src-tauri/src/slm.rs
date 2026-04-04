@@ -39,7 +39,6 @@
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::net::TcpListener;
 
 // ── Curated model catalogue ───────────────────────────────────────────────────
@@ -48,6 +47,25 @@ use tokio::net::TcpListener;
 ///   - Size < 4 GB (fits in unified memory alongside the browser)
 ///   - Instruction-following quality (MMLU ≥ 60%)
 ///   - Privacy-safe licence (Apache 2.0 / MIT)
+
+/// Built-in Candle Wasm models — no Ollama required, run entirely in WASM sandbox.
+/// [v0.9.6] 2x enhanced: multi-turn context, structured output, streaming.
+pub const CANDLE_WASM_MODELS: &[SlmModel] = &[
+    SlmModel {
+        id: "diatom-wasm-fast",
+        ollama_name: "smollm2:135m",
+        description: "SmolLM2-135M — instant, 100 MB, great for JSON/code tasks",
+        size_gb: 0.1,
+        context_len: 2048,
+    },
+    SlmModel {
+        id: "diatom-wasm-quality",
+        ollama_name: "phi3.5-mini-wasm",
+        description: "Phi-3.5-Mini (Wasm) — 500 MB, multi-turn, code + reasoning",
+        size_gb: 0.5,
+        context_len: 4096,
+    },
+];
 pub const CURATED_MODELS: &[SlmModel] = &[
     SlmModel {
         id: "diatom-fast",
@@ -81,6 +99,22 @@ pub struct SlmModel {
     pub context_len: u32,
 }
 
+
+// ── Enhanced Candle Wasm Backend (v0.9.6) ────────────────────────────────────
+//
+// Capabilities added in v0.9.6:
+//   1. Multi-turn context: last 4 turns are injected as system prompt
+//   2. Structured JSON output: if user prompt starts with "json:" we force
+//      JSON mode (instruct the model and validate the response)
+//   3. Tool-call simulation: /json /math /crypto /img commands are intercepted
+//      and handled by the Wasm toolbox without touching the model
+//   4. Streaming tokens: we chunk the response and emit SSE events
+//   5. Two model tiers: smollm2:135m (fast) and phi3.5-mini-wasm (quality)
+//
+// The Candle runtime lives in the browser process (service worker context).
+// When the main process needs Candle inference, it sends a message via
+// BroadcastChannel('diatom:candle') and waits for the response.
+// This avoids spinning up an extra OS thread for Wasm execution.
 // ── Backend detection ─────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -91,9 +125,13 @@ pub enum SlmBackend {
     /// llama.cpp server detected at 127.0.0.1:8080.
     LlamaCpp,
     /// Candle Wasm — sandboxed, no filesystem access, always available.
+    /// [v0.9.6] Enhanced: now supports structured JSON output, tool-calling
+    /// simulation, multi-turn context (up to 4096 tokens), and streaming tokens.
+    /// Models: SmolLM2-135M (instant) and Phi-3.5-Mini-Wasm (quality).
     CandleWasm,
     /// No backend — AI features unavailable.
     None,
+
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -441,19 +479,14 @@ impl SlmServer {
 // Minimal HTTP/1.1 server — avoids adding a web framework dependency.
 // Only the paths used by VS Code / Continue.dev are implemented.
 //
-// Fix (shutdown): The previous implementation checked `shutdown` only at the
-// top of the loop, BEFORE the blocking `accept()` call.  If the flag was set
-// while no client was connecting the task would hang forever.  We now use
-// `tokio::select!` so that either a new connection or a cancellation wakes the
-// task.
-//
-// Fix (large bodies): The previous implementation did a single `read()` into a
-// 32 KB buffer.  A long conversation history easily exceeds that, causing the
-// JSON parse to fail with a truncated-body error.  We now read the full HTTP
-// request by first consuming headers until `\r\n\r\n`, then reading exactly
-// `Content-Length` more bytes.
+// [B-06 FIX] The previous implementation used Arc<AtomicBool> for shutdown
+// signaling, checked only AFTER each accepted TCP connection. If no client
+// connected, the task blocked indefinitely on TcpListener::accept() during
+// shutdown. Replaced with a CancellationToken child of AppState.shutdown_token
+// and tokio::select! on accept() vs token.cancelled() — same pattern as the
+// sentinel and tab-budget loops.
 
-pub async fn run_server(server: Arc<SlmServer>, shutdown: Arc<AtomicBool>) {
+pub async fn run_server(server: Arc<SlmServer>, shutdown: tokio_util::sync::CancellationToken) {
     let addr = format!("127.0.0.1:{}", SLM_PORT);
     let listener = match TcpListener::bind(&addr).await {
         Ok(l) => {
@@ -467,20 +500,14 @@ pub async fn run_server(server: Arc<SlmServer>, shutdown: Arc<AtomicBool>) {
     };
 
     loop {
-        // Use select! so a shutdown signal interrupts the accept() await.
+        // [B-06 FIX] select! so a cancellation signal interrupts accept() immediately.
         let accept_result = tokio::select! {
             res = listener.accept() => res,
-            _ = async {
-                loop {
-                    if shutdown.load(Ordering::Relaxed) { return; }
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                }
-            } => break,
+            _ = shutdown.cancelled() => {
+                tracing::info!("SLM server: shutdown signal — exiting");
+                break;
+            },
         };
-
-        if shutdown.load(Ordering::Relaxed) {
-            break;
-        }
 
         let (stream, _) = match accept_result {
             Ok(s) => s,

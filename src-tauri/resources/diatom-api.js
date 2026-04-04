@@ -1,9 +1,9 @@
 /**
- * diatom/src-tauri/resources/diatom-api.js  — v0.9.2
+ * diatom/src-tauri/resources/diatom-api.js  — v0.11.0
  *
  * Injected into every page rendered in the Diatom WebView.
  *
- * v0.9.2 changes:
+ * v0.11.0 changes (merged from v0.1.2 + v0.9.2):
  *   [FIX-__DIATOM_INIT__] Script now reads window.__DIATOM_INIT__ which is
  *   set by Rust (cmd_init_bundle) BEFORE this script runs. Seed is therefore
  *   always the workspace-specific value, not Math.random().

@@ -29,9 +29,13 @@
 //   - Load a bundled Blink instance (would push binary past 15MB)
 //
 // Known-incompatible domain list:
-//   User-maintained in diatom.json `compat.legacy_domains[]`.
-//   Diatom does NOT ship a default list — we don't presuppose which
-//   sites are broken for each user's environment.
+//   [v0.9.6] Three tiers:
+//     1. BUILTIN_COMPAT_HINTS: domains where we show a compatibility hint by
+//        default (no auto-redirect). User can dismiss permanently.
+//     2. Community subscription: user can subscribe to a third-party curated list
+//        (same subscription mechanism as filter lists). Diatom is the downloader;
+//        legal responsibility stays with the list maintainer (cf. PHILOSOPHY §4).
+//     3. User-maintained: diatom.json compat.legacy_domains[] — full control.
 // ─────────────────────────────────────────────────────────────────────────────
 
 use anyhow::Result;
@@ -47,6 +51,39 @@ pub enum CompatTier {
     CompatHint,          // degraded detected — show indicator, offer handoff
     SystemBrowserQueued, // user accepted handoff, pending open()
 }
+
+
+/// Domains where Diatom proactively shows a compatibility indicator (⚠)
+/// on first visit, offering system browser handoff.
+/// These are well-known enterprise / banking / government portals that
+/// commonly require Chromium-specific features or NPAPI plugins.
+///
+/// [PHILOSOPHY §4 compliance]: Diatom does NOT auto-redirect these domains.
+/// The user sees a subtle indicator and chooses whether to hand off.
+/// No tracking parameters are stripped from the offer — user decides.
+pub const BUILTIN_COMPAT_HINTS: &[&str] = &[
+    // ── Banking & financial (common hardware token / ActiveX dependencies) ──
+    "icbc.com.cn", "boc.cn", "ccb.com", "abchina.com",
+    "online.citibank.com", "secure.bankofamerica.com",
+    "chase.com", "wellsfargo.com",
+    "hsbc.com", "barclays.co.uk", "lloydsbank.com",
+    // ── Enterprise / government portals ────────────────────────────────────
+    "webex.com", "teams.microsoft.com",
+    "sharepoint.com", "portal.azure.com",
+    "gov.uk", "irs.gov", "ssa.gov",
+    "meituan.com", "12306.cn",
+    // ── Legacy enterprise intranets (typical patterns, not specific domains)
+    // These are matched by suffix in CompatStore.appears_legacy()
+    // e.g. *.corp.company.com, *.internal.*, *.intranet.*
+];
+
+/// Community compat-hint list URLs (same pull mechanism as filter subscriptions).
+/// Diatom downloads these weekly; the list maintainer takes legal responsibility
+/// for the domain classifications. Diatom acts only as a downloader (cf. §4).
+pub const COMMUNITY_COMPAT_LISTS: &[(&str, &str)] = &[
+    ("Diatom Community Compat List",
+     "https://raw.githubusercontent.com/Ansel-S/diatom-compat-lists/main/hints.txt"),
+];
 
 impl Default for CompatTier {
     fn default() -> Self {
