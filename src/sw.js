@@ -1,26 +1,11 @@
-/**
- * diatom/src/sw.js  — v0.11.0
- *
- * Service Worker — last line of defence before bytes hit the renderer.
- *
- * v7 additions:
- *   • Ghost Redirect: offline navigation miss → semantic fallback from Museum
- *   • Zen Mode: block navigations to social/entertainment categories
- *   • Threat intercept: block known-malicious domains at fetch level
- *   • DOM Crusher rules injected into HTML responses via content rewriting
- */
 
 'use strict';
 
-// [FIX-BUG-02] Cache key is now version-stamped so upgrades auto-invalidate old caches.
-// In production builds, __DIATOM_VERSION__ is replaced by build.rs at compile time.
-// During development it falls back to a timestamp so iterating always gets a fresh SW.
 const CACHE = (typeof __DIATOM_VERSION__ !== 'undefined')
   ? 'diatom-' + __DIATOM_VERSION__
-  : 'diatom-dev-' + Math.floor(Date.now() / 86400000); // one per day in dev
+  : 'diatom-dev-' + Math.floor(Date.now() / 86400000);
 const SHELL   = ['/', '/index.html', '/diatom.css', '/main.js', '/sw.js', '/manifest.json'];
 
-// ── Config (hot-updated via BroadcastChannel) ─────────────────────────────────
 let CONFIG = {
   adblock:         true,
   ua_uniformity:   true,
@@ -33,31 +18,17 @@ let CONFIG = {
   zen_categories:  ['social', 'entertainment'],
 };
 
-// In-memory Museum index (populated by IPC from the app on SW init).
-// [FIX-SW-01] Also persisted to IndexedDB so Ghost Redirect works after cold start.
-// Format: Array<{ id, url, title, tfidf_tags: string[] }>
 let MUSEUM_INDEX = [];
 
-// ── IndexedDB persistence for MUSEUM_INDEX ────────────────────────────────────
-// Ghost Redirect was broken after a cold start (SW killed + re-activated) because
-// MUSEUM_INDEX was never repopulated until the app sent a MUSEUM_INDEX message,
-// which only happened after a page load. If the first navigation was offline,
-// the index was always empty and Ghost Redirect returned null.
-//
-// Fix: persist the index to IndexedDB on every MUSEUM_INDEX message, and restore
-// it during the SW 'activate' event (before any fetch events arrive).
-
-const IDB_NAME    = 'diatom-sw';
-const IDB_VERSION = 1;
-const IDB_STORE   = 'kv';
-const IDB_KEY_MUSEUM = 'museum_index';
+const IDB_NAME        = 'diatom-sw';
+const IDB_VERSION     = 1;
+const IDB_STORE       = 'kv';
+const IDB_KEY_MUSEUM  = 'museum_index';
 
 function idbOpen() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(IDB_NAME, IDB_VERSION);
-    req.onupgradeneeded = e => {
-      e.target.result.createObjectStore(IDB_STORE);
-    };
+    req.onupgradeneeded = e => { e.target.result.createObjectStore(IDB_STORE); };
     req.onsuccess  = e => resolve(e.target.result);
     req.onerror    = e => reject(e.target.error);
   });
@@ -76,126 +47,76 @@ async function idbGet(key) {
 }
 
 async function idbSet(key, value) {
-  // [v0.6.0 FIX-BUG-06 + v0.11.0] Full error taxonomy:
-  //   • QuotaExceededError → trim Museum index to 50 newest entries and retry
-  //   • AbortError         → tx was aborted (IDB corruption?) — log and give up
-  //   • Other              → log with structured details for devtools diagnosis
-  // tx.onerror + tx.onabort bound in addition to req.onerror for complete coverage.
   try {
     const db = await idbOpen();
     await new Promise((resolve, reject) => {
       const tx  = db.transaction(IDB_STORE, 'readwrite');
       const req = tx.objectStore(IDB_STORE).put(value, key);
       req.onsuccess = () => resolve(true);
-      req.onerror   = e => reject(e.target.error);
-      tx.onerror    = e => reject(e.target.error);
+      req.onerror   = e  => reject(e.target.error);
+      tx.onerror    = e  => reject(e.target.error);
       tx.onabort    = () => reject(new DOMException('Transaction aborted', 'AbortError'));
     });
     return true;
   } catch (err) {
     const isQuota = err?.name === 'QuotaExceededError' ||
                     err?.name === 'NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR';
-    if (isQuota) {
-      console.warn('[diatom-sw] IndexedDB quota exceeded — trimming Museum index to 50 entries');
-      if (key === IDB_KEY_MUSEUM && Array.isArray(value) && value.length > 50) {
-        const trimmed = [...value]
-          .sort((a, b) => (b.frozen_at ?? 0) - (a.frozen_at ?? 0))
-          .slice(0, 50);
-        try {
-          const db2 = await idbOpen();
-          await new Promise((res, rej) => {
-            const tx2  = db2.transaction(IDB_STORE, 'readwrite');
-            const req2 = tx2.objectStore(IDB_STORE).put(trimmed, key);
-            req2.onsuccess = () => res(true);
-            req2.onerror   = e  => rej(e.target.error);
-          });
-          console.info(`[diatom-sw] Museum index trimmed to ${trimmed.length} entries`);
-          return true;
-        } catch (retryErr) {
-          console.error('[diatom-sw] idbSet retry after trim also failed:', retryErr);
-        }
-      }
-    } else {
-      console.warn('[diatom-sw] idbSet failed', { key, errorName: err?.name, message: err?.message });
+    if (isQuota && key === IDB_KEY_MUSEUM && Array.isArray(value) && value.length > 50) {
+      console.warn('[diatom-sw] Quota exceeded — trimming Museum index to 50 entries');
+      const trimmed = [...value].sort((a,b) => (b.frozen_at??0)-(a.frozen_at??0)).slice(0,50);
+      try {
+        const db2 = await idbOpen();
+        await new Promise((res, rej) => {
+          const tx2 = db2.transaction(IDB_STORE, 'readwrite');
+          const r2  = tx2.objectStore(IDB_STORE).put(trimmed, key);
+          r2.onsuccess = () => res(true);
+          r2.onerror   = e  => rej(e.target.error);
+        });
+        return true;
     }
+    console.warn('[diatom-sw] idbSet failed', { key, errorName: err?.name, message: err?.message });
     return false;
   }
 }
 
-/// Restore MUSEUM_INDEX from IndexedDB on cold start.
 async function restoreMuseumIndex() {
   const stored = await idbGet(IDB_KEY_MUSEUM);
   if (Array.isArray(stored) && stored.length > 0) {
     MUSEUM_INDEX = stored;
-    console.log(`[diatom-sw] Restored Museum index from IDB: ${stored.length} entries`);
   }
 }
 
-// In-memory threat list (populated from DB on startup)
-let THREAT_SET = new Set();
-
-// DOM crusher rules per domain: Map<domain, selector[]>
+let THREAT_SET   = new Set();
 let CRUSHER_RULES = new Map();
+let DIATOM_UA    = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/619.1.26 (KHTML, like Gecko) Version/18.0 Safari/619.1.26';
 
-// [FIX-S4] DIATOM_UA is now dynamic — updated by main thread after Sentinel populates.
-// Falls back to a reasonable static UA until the first CONFIG message arrives.
-// The main thread sends { type: 'CONFIG', config: { synthesised_ua: '...' } }
-// after boot() completes.
-let DIATOM_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/619.1.26 (KHTML, like Gecko) Version/18.0 Safari/619.1.26';
-
-
-// [v0.11.0 PERF] Stale-while-revalidate for static assets (fonts, CSS, JS).
-// The browser already caches these aggressively; the SW adds a second layer
-// so navigations to diatom:// pages are instant even on the first load.
-const STATIC_CACHE = 'diatom-static-v1';
-const STATIC_EXTS  = ['.css', '.js', '.woff2', '.ico', '.png'];
-
-function isStaticAsset(url) {
-  try {
-    const path = new URL(url).pathname;
-    return STATIC_EXTS.some(ext => path.endsWith(ext));
-  } catch { return false; }
-}
-
-const bc = new BroadcastChannel('diatom:sw');
-const devnetBC = new BroadcastChannel('diatom:devnet');
-let _reqSeq = 0;
+const bc        = new BroadcastChannel('diatom:sw');
+const devnetBC  = new BroadcastChannel('diatom:devnet');
+let   _reqSeq   = 0;
 
 bc.addEventListener('message', e => {
   const msg = e.data;
   if (!msg?.type) return;
-
   switch (msg.type) {
     case 'CONFIG':
       Object.assign(CONFIG, msg.config);
-      // [FIX-S4] Update UA when Sentinel provides a fresh synthesised string
-      if (msg.config?.synthesised_ua) {
-        DIATOM_UA = msg.config.synthesised_ua;
-      }
+      if (msg.config?.synthesised_ua) DIATOM_UA = msg.config.synthesised_ua;
       break;
     case 'ZEN':
       CONFIG.zen_active = !!msg.active;
       break;
     case 'MUSEUM_INDEX':
       MUSEUM_INDEX = msg.index ?? [];
-      // [FIX-SW-01] Persist to IndexedDB so Ghost Redirect survives cold start.
-      idbSet(IDB_KEY_MUSEUM, MUSEUM_INDEX).catch(err => {
-        // [BUG-6 FIX] Log write failures so Ghost Redirect silent failure is visible.
-        // Common causes: storage quota exceeded, IDB corrupted in Private Browsing.
-        console.warn('[diatom-sw] Museum IDB persist failed — Ghost Redirect will not survive cold start:', err);
-      });
+      idbSet(IDB_KEY_MUSEUM, MUSEUM_INDEX).catch(() => {});
       break;
     case 'THREAT_LIST':
       THREAT_SET = new Set(msg.list ?? []);
       break;
     case 'CRUSHER_RULES':
-      // { domain: string, selectors: string[] }
       CRUSHER_RULES.set(msg.domain, msg.selectors ?? []);
       break;
   }
 });
-
-// ── Blocklist ─────────────────────────────────────────────────────────────────
 
 const BLOCKED = new Set([
   'doubleclick.net','googlesyndication.com','googletagmanager.com',
@@ -210,6 +131,24 @@ const BLOCKED = new Set([
   'munchkin.marketo.net','js.hs-scripts.com','cdn.heapanalytics.com',
 ]);
 
+const HEATMAP_SCRIPTS = new Set([
+  'static.hotjar.com',
+  'script.hotjar.com',
+  'vars.hotjar.com',
+  'mouseflow.com',
+  'cdn.mouseflow.com',
+  'rec.smartlook.com',
+  'manager.smartlook.com',
+  'recordings.lucky-orange.com',
+  'lo.lt.lucky-orange.com',
+  'cdn.crazyegg.com',
+  'heapanalytics.com',
+  'cdn.heapanalytics.com',
+  'cdn.reamaze.com',       // session replay overlay
+  'cdn.contentsquare.net',
+  'y.clarity.ms',
+]);
+
 const STRIP_PARAMS = new Set([
   '_ga','_gac','_gl','dclid','fbclid','gad_source','gbraid','gclid',
   'gclsrc','igshid','li_fat_id','mc_eid','msclkid','s_kwcid','trk',
@@ -220,11 +159,10 @@ const STRIP_PARAMS = new Set([
 const STUB_MAP = {
   'google-analytics.com': 'window.ga=function(){};window.gtag=function(){};',
   'googletagmanager.com': 'window.dataLayer=window.dataLayer||[];',
-  'hotjar.com': '(function(h){h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)}})(window);',
+  'hotjar.com':           '(function(h){h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)}})(window);',
   'connect.facebook.net': '!function(f){f.fbq=function(){};f.fbq.loaded=!0;}(window);',
 };
 
-// Zen mode category domains
 const ZEN_CATEGORIES = {
   social: new Set([
     'twitter.com','x.com','instagram.com','facebook.com','tiktok.com',
@@ -238,25 +176,20 @@ const ZEN_CATEGORIES = {
   ]),
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 function hostOf(url) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch { return ''; }
+  try { return new URL(url).hostname.replace(/^www\./, ''); }
+  catch { return ''; }
 }
 
 function isBlocked(url) {
   const h = hostOf(url);
   if (!h) return false;
-  for (const p of BLOCKED) { if (h.includes(p)) return true; }
+  for (const p of BLOCKED)        { if (h.includes(p)) return true; }
+  for (const p of HEATMAP_SCRIPTS){ if (h === p || h.endsWith(`.${p}`)) return true; }
   return false;
 }
 
-function isThreat(url) {
-  const h = hostOf(url);
-  return THREAT_SET.has(h);
-}
+function isThreat(url) { return THREAT_SET.has(hostOf(url)); }
 
 function zenCategory(url) {
   if (!CONFIG.zen_active) return null;
@@ -295,40 +228,157 @@ function cleanHeaders(req) {
   headers.set('User-Agent', DIATOM_UA);
   headers.set('DNT', '1');
   headers.set('Sec-GPC', '1');
-  // Preserve Accept / Accept-Language from original request
   const accept = req.headers.get('Accept');
   if (accept) headers.set('Accept', accept);
   return headers;
 }
 
-// ── Ghost Redirect ────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 
-/**
- * Find semantically similar Museum entries for a failed URL.
- *
- * LEGAL NOTE (Safe Harbor):
- *   Ghost Redirect only surfaces content the USER personally froze
- *   on their own device. It never fetches, mirrors, or distributes
- *   third-party content. It is legally equivalent to macOS Spotlight
- *   searching the user's own local files.
- *
- *   - No content leaves the device.
- *   - No P2P sharing of frozen pages between users.
- *   - E-WBN bundles are user-initiated, device-local, and encrypted.
- *
- * Uses simple overlap of URL tokens against tfidf_tags.
- */
-function ghostRedirect(failedUrl) {
-  if (!MUSEUM_INDEX.length) return null;
+const TRACKING_PIXEL_RE =
+  /<img\b[^>]*\s(?:width=["']?[01]["']?|width=0)[^>]*\s(?:height=["']?[01]["']?|height=0)[^>]*>/gi;
 
-  // Tokenise the failed URL path
-  let parsedHost = '';
-  let parsedPath = '';
+const HIDDEN_IMG_RE =
+  /<img\b[^>]*\bstyle=["'][^"']*(?:display\s*:\s*none|visibility\s*:\s*hidden)[^"']*["'][^>]*>/gi;
+
+function stripTrackingPixels(html) {
+  return html
+    .replace(TRACKING_PIXEL_RE, '<!-- [diatom] tracking pixel removed -->')
+    .replace(HIDDEN_IMG_RE,     '<!-- [diatom] hidden img removed -->');
+}
+
+const CONSENT_REJECT_SCRIPT = `<script>
+(function diatomConsentReject(){
+  'use strict';
   try {
-    const u = new URL(failedUrl);
+    if (typeof __tcfapi === 'function') {
+      __tcfapi('setUserDecision', 2, function(){}, { decision: 2 });
+    }
+
+    if (typeof OneTrust !== 'undefined' && OneTrust.RejectAll) OneTrust.RejectAll();
+    if (typeof OptanonWrapper === 'function') {
+      document.cookie = 'OptanonAlertBoxClosed=' + new Date().toISOString();
+      document.cookie = 'OptanonConsent=isGpcEnabled=0&datestamp=' + encodeURIComponent(new Date().toUTCString()) + '&version=6.38.0&consentId=diatom&isIABGlobal=false&hosts=&landingPath=NotLandingPage&groups=C0001%3A1&AwaitingReconsent=false';
+    }
+
+    if (typeof Cookiebot !== 'undefined') {
+      Cookiebot.decline();
+    }
+    document.cookie = 'CookieConsent={stamp:%27reject%27%2C+necessary:true%2C+preferences:false%2C+statistics:false%2C+marketing:false%2C+method:%27explicit%27%2C+ver:1}; max-age=31536000; SameSite=Lax';
+
+    document.cookie = 'cookieyes-consent=consentid:diatom,consent:no,action:no,necessary:yes,functional:no,analytics:no,performance:no,advertisement:no; max-age=31536000; SameSite=Lax';
+
+    const style = document.createElement('style');
+    style.textContent = [
+      '#onetrust-consent-sdk','#onetrust-banner-sdk',
+      '#cookie-law-info-bar','.cookieconsent','.cookie-consent',
+      '#CybotCookiebotDialog','#cookiebot','.cc-banner','.cc-window',
+      '#qc-cmp2-container','.qc-cmp2-container',
+      '[id*="cookie-banner"],[id*="cookieBanner"],[class*="cookie-banner"]',
+      '[id*="consent-banner"],[class*="consent-banner"]',
+      '#didomi-notice','.didomi-notice-banner',
+      '#axeptio_overlay','.axeptio_overlay',
+      '.osano-cm-window','#osano-cm-window',
+      '#sp_message_container','.sp_message_container',
+    ].map(s => s + '{display:none!important;visibility:hidden!important;opacity:0!important;}').join('\\n');
+    (document.head || document.documentElement).appendChild(style);
+})();
+</script>`;
+
+function injectConsentReject(html) {
+  if (html.includes('<head>')) return html.replace('<head>', '<head>' + CONSENT_REJECT_SCRIPT);
+  if (html.includes('<body')) return html.replace('<body', CONSENT_REJECT_SCRIPT + '<body');
+  return CONSENT_REJECT_SCRIPT + html;
+}
+
+const CLIPBOARD_STRIP_SCRIPT = `<script>
+(function diatomClipboardStrip(){
+  'use strict';
+  document.addEventListener('copy', function(e){
+    try {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) return;
+      const raw = sel.toString();
+      const clean = raw.replace(/[\u200B-\u200F\u2060\u2063\uFEFF\u00AD]/g, '');
+      if (clean === raw) return; // nothing to strip
+      e.preventDefault();
+      e.clipboardData.setData('text/plain', clean);
+  }, true);
+})();
+</script>`;
+
+function injectClipboardStrip(html) {
+  if (html.includes('</body>')) return html.replace('</body>', CLIPBOARD_STRIP_SCRIPT + '</body>');
+  return html + CLIPBOARD_STRIP_SCRIPT;
+}
+
+const SENSOR_SPOOF_SCRIPT = `<script>
+(function diatomSensorSpoof(){
+  'use strict';
+  if (window.__DIATOM_SENSOR_SPOOF__) return;
+  window.__DIATOM_SENSOR_SPOOF__ = true;
+
+  if (navigator.getBattery) {
+    const fakeBattery = {
+      level: 1.0,
+      charging: true,
+      chargingTime: 0,
+      dischargingTime: Infinity,
+      addEventListener: function(){},
+      removeEventListener: function(){},
+    };
+    Object.defineProperty(navigator, 'getBattery', {
+      value: function() { return Promise.resolve(fakeBattery); },
+      writable: false, configurable: false,
+    });
+  }
+
+  window.addEventListener('devicemotion', function(e) {
+    e.stopImmediatePropagation();
+  }, true);
+
+  window.addEventListener('deviceorientation', function(e) {
+    e.stopImmediatePropagation();
+  }, true);
+
+  if (typeof AmbientLightSensor !== 'undefined') {
+    window.AmbientLightSensor = class FakeALS {
+      get illuminance() { return 500; }
+      start() {}
+      stop()  {}
+      addEventListener()    {}
+      removeEventListener() {}
+    };
+  }
+})();
+</script>`;
+
+function injectSensorSpoof(html) {
+  if (html.includes('<head>')) return html.replace('<head>', '<head>' + SENSOR_SPOOF_SCRIPT);
+  return SENSOR_SPOOF_SCRIPT + html;
+}
+
+function injectCrusherStyles(html, domain) {
+  const selectors = CRUSHER_RULES.get(domain) ?? [];
+  if (!selectors.length) return html;
+  const css      = selectors.map(s => `${s}{display:none!important}`).join('\n');
+  const injected = `<style id="diatom-crusher">\n${css}\n</style>`;
+  if (html.includes('<head>')) return html.replace('<head>', `<head>${injected}`);
+  if (html.includes('</head>')) return html.replace('</head>', `${injected}</head>`);
+  return injected + html;
+}
+
+function findArchiveMatches(failedUrl) {
+  if (!MUSEUM_INDEX.length) return [];
+
+  let parsedHost = '', parsedPath = '';
+  try {
+    const u   = new URL(failedUrl);
     parsedHost = u.hostname;
     parsedPath = u.pathname;
-  } catch { return null; }
+  } catch { return []; }
 
   const tokens = new Set(
     (parsedPath + ' ' + parsedHost)
@@ -338,114 +388,74 @@ function ghostRedirect(failedUrl) {
       .filter(t => t.length > 2),
   );
 
-  const now = Date.now() / 1000;  // unix seconds
-
-  const scored = MUSEUM_INDEX.map(entry => {
-    const tags  = Array.isArray(entry.tfidf_tags)
-      ? entry.tfidf_tags
-      : JSON.parse(entry.tfidf_tags ?? '[]');
-    const score = tags.filter(t => tokens.has(t.toLowerCase())).length;
-    // Age of the frozen content in days
-    const ageDays = entry.frozen_at ? Math.floor((now - entry.frozen_at) / 86400) : 0;
-    return { ...entry, score, ageDays };
-  }).filter(e => e.score > 0)
+  return MUSEUM_INDEX
+    .map(entry => {
+      const tags  = Array.isArray(entry.tfidf_tags)
+        ? entry.tfidf_tags : JSON.parse(entry.tfidf_tags ?? '[]');
+      const score = tags.filter(t => tokens.has(t.toLowerCase())).length;
+      return { ...entry, score };
+    })
+    .filter(e => e.score > 0)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 3);
-
-  if (!scored.length) return null;
-
-  return buildGhostPage(failedUrl, scored);
+    .slice(0, 5);
 }
 
-function buildGhostPage(failedUrl, matches) {
+function buildArchiveSuggestionBanner(failedUrl) {
+  const matches = findArchiveMatches(failedUrl);
+  if (!matches.length) return '';
+
+  const n     = matches.length;
   const items = matches.map(m => {
-    // Staleness warning: content frozen > 30 days ago gets a flag
-    const staleWarning = m.ageDays > 30
-      ? `<span style="color:#d97706;font-size:.72rem;margin-left:.4rem;" title="This archive is over 30 days old">⚠ Archived ${m.ageDays}d ago</span>`
-      : (m.ageDays > 0 ? `<span style="color:#64748b;font-size:.72rem;margin-left:.4rem;">${m.ageDays}d ago</span>` : '');
-
-    return `
-    <li>
-      <a href="diatom://museum/${m.id}" style="color:#60a5fa;text-decoration:none;">
+    const ageDays = m.frozen_at
+      ? Math.floor((Date.now() / 1000 - m.frozen_at) / 86400) : 0;
+    const ageStr  = ageDays > 0 ? ` · ${ageDays}d ago` : '';
+    return `<li>
+      <a href="diatom://museum/${escHtml(m.id)}" style="color:#60a5fa;text-decoration:none;font-size:.82rem;">
         ${escHtml(m.title || m.url)}
-      </a>${staleWarning}
-      <span style="color:#334155;font-size:.72rem;display:block;margin-top:.15rem;">
-        ${escHtml(m.url.slice(0, 80))}
-      </span>
-    </li>
-  `}).join('');
+      </a>
+      <span style="color:#475569;font-size:.72rem;">${ageStr}</span>
+    </li>`;
+  }).join('');
 
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Content Not Yet Archived</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background: #0a0a10; color: #94a3b8;
-      font-family: 'Inter', system-ui, sans-serif;
-      display: flex; align-items: center; justify-content: center;
-      min-height: 100vh; padding: 2rem;
-    }
-    .card { max-width: 560px; width: 100%; }
-    h1 {
-      font-family: 'Lora', Georgia, serif;
-      font-size: 1.4rem; font-weight: 500;
-      color: #e2e8f0; margin-bottom: .75rem; line-height: 1.4;
-    }
-    p { font-size: .85rem; line-height: 1.6; margin-bottom: 1.25rem; }
-    .url { color: #475569; font-size: .75rem; word-break: break-all;
-           background: rgba(255,255,255,.04); padding: .4rem .6rem;
-           border-radius: .3rem; margin-bottom: 1.5rem; }
-    h2 { font-size: .7rem; letter-spacing: .1em; text-transform: uppercase;
-         color: #334155; margin-bottom: .75rem; }
-    ul { list-style: none; }
-    ul li { padding: .6rem 0; border-bottom: 1px solid rgba(255,255,255,.05); }
-    ul li:last-child { border: none; }
-    .stale-note { color:#64748b; font-size:.75rem; margin-top:1rem; font-style:italic; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>This Path Has Not Been Archived</h1>
-    <p>You navigated to an unarchived page while offline. Here is semantically related content from your <strong>local Museum</strong>.</p>
-    <div class="url">${escHtml(failedUrl)}</div>
-    <h2>Approximate matches in your Museum</h2>
-    <ul>${items}</ul>
-    <p class="stale-note">⚠ Flagged archives are over 30 days old. Content may differ from the current live page — treat the online version as authoritative.</p>
+  return `
+<aside id="diatom-archive-suggestion" style="
+  position:fixed; bottom:1.2rem; right:1.2rem; z-index:99999;
+  background:#1e293b; border:1px solid rgba(96,165,250,.22);
+  border-radius:.5rem; padding:1rem 1.1rem; max-width:340px;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  box-shadow:0 4px 20px rgba(0,0,0,.4);
+  color:#94a3b8; font-size:.8rem; line-height:1.5;
+">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem;">
+    <span style="color:#60a5fa;font-weight:500;">
+      📚 Found ${n} archive(s) in Museum
+    </span>
+    <button onclick="document.getElementById('diatom-archive-suggestion').remove()"
+      style="background:none;border:none;cursor:pointer;color:#475569;font-size:1rem;line-height:1;padding:0 0 0 .5rem;">✕</button>
   </div>
-</body>
-</html>`;
+  <ul style="list-style:none;margin:0;padding:0;">${items}</ul>
+</aside>`;
 }
 
-// ── DOM Crusher injection ─────────────────────────────────────────────────────
+async function rewriteHtml(response, url) {
+  let html = await response.text();
 
-/**
- * Inject a <style> tag with crusher rules into an HTML response.
- * This fires before the browser parses the DOM, so elements never paint.
- */
-function injectCrusherStyles(html, domain) {
-  const selectors = CRUSHER_RULES.get(domain) ?? [];
-  if (!selectors.length) return html;
+  html = stripTrackingPixels(html);
 
-  const css = selectors
-    .map(s => `${s}{display:none!important}`)
-    .join('\n');
+  html = injectSensorSpoof(html);
 
-  const injected = `<style id="diatom-crusher">\n${css}\n</style>`;
-  // Inject right after <head> or before </head>
-  if (html.includes('<head>')) {
-    return html.replace('<head>', `<head>${injected}`);
-  }
-  if (html.includes('</head>')) {
-    return html.replace('</head>', `${injected}</head>`);
-  }
-  return injected + html;
+  html = injectConsentReject(html);
+
+  html = injectClipboardStrip(html);
+
+  const domain = hostOf(url);
+  html = injectCrusherStyles(html, domain);
+
+  return new Response(html, {
+    status:  response.status,
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+  });
 }
-
-// ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 self.addEventListener('install', e => {
   e.waitUntil(
@@ -455,37 +465,29 @@ self.addEventListener('install', e => {
 
 self.addEventListener('activate', e => {
   e.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))),
-    )
-    // [FIX-SW-01] Restore MUSEUM_INDEX from IDB so Ghost Redirect works immediately
-    // even before the app sends a MUSEUM_INDEX message (cold start scenario).
-    .then(() => restoreMuseumIndex())
-    .then(() => self.clients.claim()),
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => restoreMuseumIndex())
+      .then(() => self.clients.claim()),
   );
 });
-
-// ── Fetch handler ─────────────────────────────────────────────────────────────
 
 self.addEventListener('fetch', e => {
   const req  = e.request;
   const url  = req.url;
-  const mode = req.mode;  // 'navigate' | 'no-cors' | 'cors' | 'same-origin'
+  const mode = req.mode;
 
-  // 1. Shell assets: cache-first
   if (SHELL.some(s => url.endsWith(s))) {
     e.respondWith(caches.match(req).then(r => r ?? fetch(req)));
     return;
   }
 
-  // 2. Threat intercept
   if (isThreat(url)) {
     devnetBC.postMessage({ type:'NET_ENTRY', entry:{ id:++_reqSeq, url, method:req.method, status:-1, durationMs:0, blockedBy:'threat:local_list', ts:Date.now() }});
     e.respondWith(threatInterstitial(url));
     return;
   }
 
-  // 3. Ad/tracker block
   if (CONFIG.adblock && isBlocked(url)) {
     devnetBC.postMessage({ type:'NET_ENTRY', entry:{ id:++_reqSeq, url, method:req.method, status:-1, durationMs:0, blockedBy:'adblock:aho-corasick', ts:Date.now() }});
     const stub = stubFor(url);
@@ -497,23 +499,20 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // 4. Zen mode: block navigation to social/entertainment
   if (mode === 'navigate') {
     const cat = zenCategory(url);
     if (cat) {
-      e.respondWith(zenInterstitialResponse(url, cat));
-      return;
-    }
+    e.respondWith(zenInterstitialResponse(url, cat));
+    return;
+  }
   }
 
-  // 5. Offline navigation: Ghost Redirect
   if (mode === 'navigate') {
     e.respondWith(handleNavigate(req, url));
     return;
   }
 
-  // 6. Default: clean fetch with /devnet timing
-  const clean = upgradeHttps(stripParams(url));
+  const clean   = upgradeHttps(stripParams(url));
   const cleaned = new Request(clean, {
     method:  req.method,
     headers: CONFIG.ua_uniformity ? cleanHeaders(req) : req.headers,
@@ -535,10 +534,7 @@ self.addEventListener('fetch', e => {
   );
 });
 
-// ── Navigate handler ──────────────────────────────────────────────────────────
-
 async function handleNavigate(req, url) {
-  // Try network first
   try {
     const netResp = await fetch(new Request(upgradeHttps(stripParams(url)), {
       headers: CONFIG.ua_uniformity ? cleanHeaders(req) : req.headers,
@@ -546,62 +542,27 @@ async function handleNavigate(req, url) {
     }));
 
     if (netResp.ok) {
-      const contentType = netResp.headers.get('Content-Type') ?? '';
-      if (contentType.includes('text/html')) {
-        // Inject DOM crusher styles if rules exist for this domain
-        const domain = hostOf(url);
-        const rules  = CRUSHER_RULES.get(domain);
-        if (rules?.length) {
-          const html    = await netResp.text();
-          const patched = injectCrusherStyles(html, domain);
-          return new Response(patched, {
-            status:  netResp.status,
-            headers: { 'Content-Type': 'text/html; charset=utf-8' },
-          });
-        }
+      const ct = netResp.headers.get('Content-Type') ?? '';
+      if (ct.includes('text/html')) {
+        return await rewriteHtml(netResp, url);
       }
       return netResp;
     }
-  } catch {
-    // Network failed — try Ghost Redirect
-  }
 
-  // Try cache
   const cached = await caches.match(req);
   if (cached) return cached;
 
-  // Ghost Redirect: semantic fallback from Museum index
-  const ghost = ghostRedirect(url);
-  if (ghost) {
-    return new Response(ghost, {
-      status:  200,
-      headers: { 'Content-Type': 'text/html; charset=utf-8' },
-    });
-  }
-
-  // Final fallback: offline page
   return offlinePage(url);
 }
 
-// ── Static response builders ──────────────────────────────────────────────────
-
 function zenInterstitialResponse(url, category) {
-  // The JS Zen module handles the full interstitial UI.
-  // The SW simply returns a minimal page that triggers the JS module.
   const html = `<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Zen</title>
-<script>
-  // Signal the Zen module that a blocked navigation was attempted
-  window.__DIATOM_ZEN_BLOCK__ = { url: ${JSON.stringify(url)}, category: ${JSON.stringify(category)} };
-</script>
-</head><body>
-<script type="module" src="/main.js"></script>
-</body></html>`;
-  return new Response(html, {
-    status: 200,
-    headers: { 'Content-Type': 'text/html; charset=utf-8' },
-  });
+<script>window.__DIATOM_ZEN_BLOCK__ = { url: ${JSON.stringify(url)}, category: ${JSON.stringify(category)} };</script>
+</head><body><script type="module" src="/main.js"></script></body></html>`;
+  return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
+
 
 function threatInterstitial(url) {
   const domain = hostOf(url);
@@ -609,52 +570,40 @@ function threatInterstitial(url) {
 <html lang="en">
 <head><meta charset="UTF-8"><title>Security Warning</title>
 <style>
-  body{background:#0a0a10;color:#f87171;font-family:'Inter',system-ui,sans-serif;
+  body{background:#0a0a10;color:#f87171;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
        display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;}
-  .card{max-width:460px;}
-  h1{font-size:1.3rem;margin-bottom:.75rem;}
+  .card{max-width:460px;}h1{font-size:1.3rem;margin-bottom:.75rem;}
   p{font-size:.85rem;color:#94a3b8;line-height:1.6;margin-bottom:1rem;}
-  code{background:rgba(239,68,68,.1);padding:.2rem .4rem;border-radius:.25rem;}
-  a{color:#60a5fa;}
-</style>
-</head>
-<body>
-<div class="card">
+  code{background:rgba(239,68,68,.1);padding:.2rem .4rem;border-radius:.25rem;}a{color:#60a5fa;}
+</style></head>
+<body><div class="card">
   <h1>⚠ Threat Intelligence Block</h1>
-  <p>Independent threat intelligence has flagged <code>${escHtml(domain)}</code> as a malicious domain.</p>
-  <p>If you believe this is a false positive, you can allowlist this domain in Diatom's trust settings.</p>
+  <p>Independent threat intelligence flagged <code>${escHtml(domain)}</code>.</p>
   <p><a href="javascript:history.back()">← Go back</a></p>
-</div>
-</body></html>`;
-  return new Response(html, {
-    status: 200,
-    headers: { 'Content-Type': 'text/html; charset=utf-8' },
-  });
+</div></body></html>`;
+  return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
 
 function offlinePage(failedUrl) {
+  const archiveBanner = buildArchiveSuggestionBanner(failedUrl);
+
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><title>Offline</title>
 <style>
-  body{background:#0a0a10;color:#475569;font-family:'Lora',Georgia,serif;
-       display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;}
-  p{font-size:1rem;line-height:1.7;max-width:400px;}
-  span{color:#334155;}
-</style>
-</head>
+  body{background:#0a0a10;color:#475569;
+       font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+       display:flex;align-items:center;justify-content:center;min-height:100vh;
+       text-align:center;padding:2rem;}
+  p{font-size:1rem;line-height:1.7;max-width:420px;}
+</style></head>
 <body>
 <p>
-  This content has not been archived. Connect to the internet and use Freeze to save it.<br>
-  <span style="font-size:.8rem;font-family:'Inter',system-ui;margin-top:.75rem;display:block;">${escHtml(failedUrl.slice(0, 80))}</span>
+  This page has not been archived. Use Freeze (⌘⇧S) to save it when online.<br>
+  <span style="color:#334155;font-size:.78rem;display:block;margin-top:.5rem;word-break:break-all;">${escHtml(failedUrl.slice(0, 80))}</span>
 </p>
+${archiveBanner}
 </body></html>`;
-  return new Response(html, {
-    status: 503,
-    headers: { 'Content-Type': 'text/html; charset=utf-8' },
-  });
+  return new Response(html, { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
 
-function escHtml(s) {
-  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}

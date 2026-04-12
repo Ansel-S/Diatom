@@ -1,64 +1,12 @@
-/**
- * diatom/src/features/tab-groups.js  — v0.9.6
- *
- * Tab Groups — Workspaces 2.0
- *
- * Inspired by Chrome's upcoming "Project" concept, which merges Tab Groups
- * and Workspaces into a single intent-based container. In Diatom, we keep
- * the branding as "Workspace" but elevate Groups as a first-class sub-unit
- * within each Workspace.
- *
- * Hierarchy:
- *   Workspace (max 8, persisted in SQLite)
- *   └── Group (0-n per workspace, named + colored, collapsible)
- *       └── Tab (n per group, or ungrouped at workspace root)
- *
- * Differences from Chrome Tab Groups:
- *   - Groups persist between sessions (stored in SQLite via cmd_tab_group_*)
- *   - Groups are tied to a Workspace — cross-workspace moves are supported
- *   - Collapsing a group puts all member tabs into shallow sleep
- *   - "Project mode": a group can be pinned to always occupy the Focus zone
- *     (61.8%) of the adaptive tab budget
- *   - No Chromium required — all state in Rust/SQLite
- *
- * IPC commands used:
- *   cmd_tab_group_create   { workspace_id, name, color, project_mode }
- *   cmd_tab_group_delete   { group_id }
- *   cmd_tab_group_rename   { group_id, name }
- *   cmd_tab_group_move_tab { tab_id, group_id | null }
- *   cmd_tab_groups_list    { workspace_id }
- *   cmd_tab_group_collapse { group_id, collapsed }
- */
 
 'use strict';
 
 import { invoke } from '../browser/ipc.js';
 import { el, qs, escHtml, uid } from '../browser/utils.js';
 
-// ── State ──────────────────────────────────────────────────────────────────────
-
-/** @type {Map<string, TabGroup>}  groupId → group */
 let _groups = new Map();
-/** @type {Map<string, string>}   tabId   → groupId (null = ungrouped) */
 let _tabGroupMap = new Map();
-/** Currently active workspace id */
 let _wsId = null;
-
-// ── Types ──────────────────────────────────────────────────────────────────────
-
-/**
- * @typedef {Object} TabGroup
- * @property {string}   id
- * @property {string}   workspace_id
- * @property {string}   name
- * @property {string}   color   — hex or CSS color name
- * @property {boolean}  collapsed
- * @property {boolean}  project_mode  — if true, always in Focus zone
- * @property {string[]} tab_ids
- * @property {number}   created_at
- */
-
-// ── Init ──────────────────────────────────────────────────────────────────────
 
 export async function initTabGroups(workspaceId) {
   _wsId = workspaceId;
@@ -82,14 +30,6 @@ async function loadGroups(wsId) {
   }
 }
 
-// ── Public API ─────────────────────────────────────────────────────────────────
-
-/**
- * Create a new group in the current workspace.
- * @param {string} name
- * @param {string} color   — e.g. '#60a5fa'
- * @param {boolean} projectMode
- */
 export async function createGroup(name, color = '#60a5fa', projectMode = false) {
   try {
     const group = await invoke('cmd_tab_group_create', {
@@ -107,10 +47,6 @@ export async function createGroup(name, color = '#60a5fa', projectMode = false) 
   }
 }
 
-/**
- * Delete a group (its tabs become ungrouped).
- * @param {string} groupId
- */
 export async function deleteGroup(groupId) {
   try {
     await invoke('cmd_tab_group_delete', { group_id: groupId });
@@ -125,15 +61,9 @@ export async function deleteGroup(groupId) {
   }
 }
 
-/**
- * Move a tab into a group (or ungroup it with groupId=null).
- * @param {string} tabId
- * @param {string|null} groupId
- */
 export async function moveTabToGroup(tabId, groupId) {
   try {
     await invoke('cmd_tab_group_move_tab', { tab_id: tabId, group_id: groupId });
-    // Update local state
     const oldGroup = _tabGroupMap.get(tabId);
     if (oldGroup) {
       const g = _groups.get(oldGroup);
@@ -152,18 +82,12 @@ export async function moveTabToGroup(tabId, groupId) {
   }
 }
 
-/**
- * Collapse or expand a group (collapses → shallow-sleeps all member tabs).
- * @param {string} groupId
- * @param {boolean} collapsed
- */
 export async function setGroupCollapsed(groupId, collapsed) {
   try {
     await invoke('cmd_tab_group_collapse', { group_id: groupId, collapsed });
     const g = _groups.get(groupId);
     if (g) {
       g.collapsed = collapsed;
-      // Sleep/wake tabs in bulk
       for (const tid of g.tab_ids) {
         if (collapsed) {
           invoke('cmd_tab_sleep', { tab_id: tid }).catch(() => {});
@@ -178,11 +102,6 @@ export async function setGroupCollapsed(groupId, collapsed) {
   }
 }
 
-/**
- * Rename a group.
- * @param {string} groupId
- * @param {string} newName
- */
 export async function renameGroup(groupId, newName) {
   try {
     await invoke('cmd_tab_group_rename', { group_id: groupId, name: newName });
@@ -194,31 +113,21 @@ export async function renameGroup(groupId, newName) {
   }
 }
 
-/** Return the group a given tab belongs to, or null. */
 export function groupForTab(tabId) {
   const gid = _tabGroupMap.get(tabId);
   return gid ? (_groups.get(gid) ?? null) : null;
 }
 
-/** Return all groups for current workspace. */
 export function allGroups() {
   return Array.from(_groups.values());
 }
 
-// ── Rendering ─────────────────────────────────────────────────────────────────
-
-/**
- * Inject group-header chips into the tab bar.
- * Called after any group state change and by the tabs render loop.
- */
 export function renderGroupHeaders() {
   const bar = qs('#tab-bar');
   if (!bar) return;
 
-  // Remove existing group headers
   bar.querySelectorAll('.tab-group-header').forEach(n => n.remove());
 
-  // Add group header chips before the first tab in each group
   for (const group of _groups.values()) {
     if (!group.tab_ids.length) continue;
 
@@ -237,19 +146,16 @@ function buildGroupHeader(group) {
   chip.dataset.groupId = group.id;
   chip.style.setProperty('--group-color', group.color);
 
-  // Color dot
   const dot = el('span', 'group-dot');
   dot.style.background = group.color;
   chip.appendChild(dot);
 
-  // Name (editable on dblclick)
   const nameEl = el('span', 'group-name');
   nameEl.textContent = group.name;
   nameEl.title = group.project_mode ? `${group.name} (Project Mode)` : group.name;
   nameEl.addEventListener('dblclick', () => startRenameGroup(group.id, nameEl));
   chip.appendChild(nameEl);
 
-  // Collapse toggle
   const toggle = el('button', 'group-toggle');
   toggle.textContent = group.collapsed ? '▶' : '▾';
   toggle.title = group.collapsed ? 'Expand group' : 'Collapse group';
@@ -260,7 +166,6 @@ function buildGroupHeader(group) {
   });
   chip.appendChild(toggle);
 
-  // Project mode star
   if (group.project_mode) {
     const star = el('span', 'group-project-star');
     star.textContent = '★';
@@ -268,13 +173,11 @@ function buildGroupHeader(group) {
     chip.appendChild(star);
   }
 
-  // Context menu on right-click
   chip.addEventListener('contextmenu', e => {
     e.preventDefault();
     showGroupContextMenu(group.id, e.clientX, e.clientY);
   });
 
-  // Drag-over: allow dropping tabs into this group
   chip.addEventListener('dragover', e => {
     e.preventDefault();
     chip.classList.add('drag-over');
@@ -310,7 +213,6 @@ function startRenameGroup(groupId, nameEl) {
 }
 
 function showGroupContextMenu(groupId, x, y) {
-  // Remove any existing context menu
   document.getElementById('group-ctx-menu')?.remove();
 
   const menu = el('div', 'ctx-menu');
@@ -368,19 +270,12 @@ function showGroupContextMenu(groupId, x, y) {
   }
 
   document.body.appendChild(menu);
-  // Close on outside click
   const dismiss = e => {
     if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', dismiss); }
   };
   setTimeout(() => document.addEventListener('click', dismiss), 0);
 }
 
-// ── Quick-add group from omnibox ───────────────────────────────────────────────
-
-/**
- * Create a group from the new-group button in the tab bar.
- * Prompts for a name inline.
- */
 export function promptNewGroup() {
   const bar = qs('#tab-bar');
   if (!bar) return;
@@ -396,7 +291,6 @@ export function promptNewGroup() {
   bar.appendChild(chip);
   input.focus();
 
-  // Color picker (inline swatches)
   const COLORS = ['#60a5fa','#34d399','#fbbf24','#f87171','#a78bfa','#fb923c','#e879f9','#94a3b8'];
   let chosenColor = COLORS[Math.floor(Math.random() * COLORS.length)];
   const swatches = el('div', 'group-color-swatches');
@@ -427,8 +321,6 @@ export function promptNewGroup() {
     if (e.key === 'Escape') { chip.remove(); }
   });
 }
-
-// ── CSS for group headers (injected once) ─────────────────────────────────────
 
 (function injectGroupStyles() {
   if (document.getElementById('diatom-group-styles')) return;
@@ -509,18 +401,6 @@ export function promptNewGroup() {
   (document.head || document.documentElement).appendChild(style);
 })();
 
-// ── ⌘T Command Palette — Cross-workspace Tab & Group Search ──────────────────
-//
-// [FIX-TABGROUPS-01] Added Arc-style ⌘T command palette for cross-workspace
-// tab search and navigation. Supports:
-//   • Fuzzy search across ALL tabs in ALL workspaces (not just current)
-//   • Group search: type ">" to filter by group name
-//   • Workspace search: type "@" to filter by workspace
-//   • Actions: switch to tab, move tab, close tab, create new group
-//
-// Keyboard: ⌘T (Mac) / Ctrl+T (Windows/Linux) to open
-//           ↑↓ to navigate, Enter to select, Esc to dismiss
-
 let _paletteEl = null;
 let _paletteInput = null;
 let _paletteList = null;
@@ -528,11 +408,9 @@ let _paletteItems = [];
 let _paletteIdx = 0;
 let _allTabsCache = [];
 
-/** Fetch all tabs across all workspaces for cross-workspace search. */
 async function loadAllTabsForPalette() {
   try {
     const { invoke } = window.__TAURI__.core;
-    // Fetch all workspaces, then all groups+tabs within each
     const workspaces = await invoke('cmd_workspaces_list').catch(() => []);
     const tabs = [];
     for (const ws of workspaces) {
@@ -543,7 +421,6 @@ async function loadAllTabsForPalette() {
           tabs.push({ ...t, _workspace: ws, _group: grp });
         }
       }
-      // Also ungrouped tabs in workspace
       const ungrouped = await invoke('cmd_tabs_ungrouped', { workspace_id: ws.id }).catch(() => []);
       for (const t of ungrouped) {
         tabs.push({ ...t, _workspace: ws, _group: null });
@@ -555,7 +432,6 @@ async function loadAllTabsForPalette() {
   }
 }
 
-/** Fuzzy score: simple bigram overlap, case-insensitive. */
 function fuzzyScore(query, target) {
   if (!query) return 1;
   const q = query.toLowerCase();
@@ -568,25 +444,21 @@ function fuzzyScore(query, target) {
   return hits / Math.max(q.length - 1, 1);
 }
 
-/** Filter _allTabsCache by palette query. */
 function filterPaletteItems(query) {
   const q = query.trim();
   let items = _allTabsCache;
 
   if (q.startsWith('>')) {
-    // Group filter mode
     const gq = q.slice(1).trim().toLowerCase();
     items = _allTabsCache.filter(t =>
       t._group && t._group.name.toLowerCase().includes(gq)
     );
   } else if (q.startsWith('@')) {
-    // Workspace filter mode
     const wq = q.slice(1).trim().toLowerCase();
     items = _allTabsCache.filter(t =>
       t._workspace.name.toLowerCase().includes(wq)
     );
   } else if (q) {
-    // Fuzzy title + url search
     items = _allTabsCache
       .map(t => ({
         tab: t,
@@ -603,7 +475,6 @@ function filterPaletteItems(query) {
   return items.slice(0, 12); // max 12 results
 }
 
-/** Render palette results list. */
 function renderPaletteList(items) {
   _paletteItems = items;
   _paletteIdx = 0;
@@ -652,7 +523,6 @@ function renderPaletteList(items) {
   });
 }
 
-/** Navigate palette selection. */
 function movePaletteSelection(delta) {
   const items = _paletteList.querySelectorAll('.palette-item');
   if (!items.length) return;
@@ -663,7 +533,6 @@ function movePaletteSelection(delta) {
   selected?.scrollIntoView({ block: 'nearest' });
 }
 
-/** Activate selected palette item. */
 async function selectPaletteItem(idx) {
   const tab = _paletteItems[idx ?? _paletteIdx];
   if (!tab) return;
@@ -676,11 +545,9 @@ async function selectPaletteItem(idx) {
   }
 }
 
-/** Open the command palette. */
 export async function openCommandPalette() {
   if (_paletteEl) { _paletteInput?.focus(); return; }
 
-  // Build overlay
   const overlay = document.createElement('div');
   overlay.id = '__diatom_palette_overlay';
   overlay.style.cssText = `
@@ -736,7 +603,6 @@ export async function openCommandPalette() {
   document.body.appendChild(overlay);
   _paletteEl = overlay;
 
-  // Inject palette item styles
   if (!document.getElementById('diatom-palette-styles')) {
     const s = document.createElement('style');
     s.id = 'diatom-palette-styles';
@@ -754,7 +620,6 @@ export async function openCommandPalette() {
     document.head.appendChild(s);
   }
 
-  // Load tabs and render initial list
   await loadAllTabsForPalette();
   renderPaletteList(filterPaletteItems(''));
   input.focus();
@@ -775,7 +640,6 @@ export async function openCommandPalette() {
   });
 }
 
-/** Close the command palette. */
 export function closePalette() {
   _paletteEl?.remove();
   _paletteEl = null;
@@ -783,7 +647,6 @@ export function closePalette() {
   _paletteList = null;
 }
 
-/** Register ⌘T / Ctrl+T global hotkey for the command palette. */
 export function registerPaletteHotkey() {
   document.addEventListener('keydown', e => {
     const isMac = navigator.platform.toLowerCase().includes('mac');
@@ -796,3 +659,4 @@ export function registerPaletteHotkey() {
     }
   }, { capture: true });
 }
+

@@ -1,29 +1,10 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// diatom/src/features/vault.js  — v0.9.5
-//
-// Vault integration for the main browser chrome.
-// Responsibilities:
-//   • Detect password fields on the current page domain → offer autofill
-//   • Show TOTP code overlay when autofilling (matches totp.match_domain)
-//   • Trigger vault panel open (opens vault.html in a sidebar pane)
-//   • Export a VaultAutofill API consumed by diatom-api.js
-//
-// Architecture: This module runs in the Diatom chrome (not injected into
-// the WebView page). It communicates via the Tauri IPC bridge.
-// ─────────────────────────────────────────────────────────────────────────────
 
 import { invoke } from '../browser/ipc.js';
-
-// ── Autofill chip ─────────────────────────────────────────────────────────────
 
 const CHIP_ID = '__diatom_vault_chip__';
 let currentDomain = '';
 let pendingLogins  = [];
 
-/**
- * Called by the tab navigation handler when the user navigates to a new URL.
- * Checks for matching vault entries and shows a subtle autofill offer.
- */
 export async function onNavigate(url) {
   removeChip();
 
@@ -31,7 +12,6 @@ export async function onNavigate(url) {
   try { domain = new URL(url).hostname; } catch { return; }
   currentDomain = domain;
 
-  // Parallel: check vault logins and TOTP codes for this domain
   const [matchedLogins, matchedTotp] = await Promise.all([
     invoke('cmd_vault_match_domain', { domain }).catch(() => []),
     invoke('cmd_totp_match', { domain }).catch(() => []),
@@ -78,13 +58,11 @@ function showAutofillChip(logins, totps) {
     else if (totps.length) showTotpPicker(totps);
   });
 
-  // Auto-dismiss after 8 seconds
   const dismissTimer = setTimeout(() => chip.remove(), 8000);
   chip.addEventListener('mouseenter', () => clearTimeout(dismissTimer));
 
   document.body.appendChild(chip);
 
-  // Inject keyframe if not already done
   if (!document.getElementById('__diatom_vault_style__')) {
     const style = document.createElement('style');
     style.id = '__diatom_vault_style__';
@@ -99,8 +77,6 @@ function showAutofillChip(logins, totps) {
 function removeChip() {
   document.getElementById(CHIP_ID)?.remove();
 }
-
-// ── Autofill picker ───────────────────────────────────────────────────────────
 
 function showAutofillPicker(logins, totps) {
   removeChip();
@@ -160,18 +136,14 @@ async function doAutofill(loginId, totps, overlay) {
 
     const entry = await invoke('cmd_vault_login_get', { id: loginId });
 
-    // Try to fill username/password fields in the page using postMessage
-    // (the page's diatom-api.js handles the actual DOM manipulation)
     window.dispatchEvent(new CustomEvent('diatom:vault-autofill', {
       detail: { username: entry.username, password: entry.password }
     }));
 
-    // Copy password to clipboard as fallback
     await navigator.clipboard.writeText(entry.password).catch(() => {});
 
     showToast(`Autofilled ${entry.title}`, 'ok');
 
-    // Show TOTP if available
     if (totps.length) {
       setTimeout(() => showTotpPicker(totps), 500);
     }
@@ -179,8 +151,6 @@ async function doAutofill(loginId, totps, overlay) {
     showToast('Autofill failed', 'err');
   }
 }
-
-// ── TOTP picker ───────────────────────────────────────────────────────────────
 
 function showTotpPicker(totps) {
   const overlay = createOverlay();
@@ -210,11 +180,11 @@ function showTotpInBox(box, totps) {
       border-bottom:1px solid #2a2d3a; cursor:pointer;
     `;
 
-    // Countdown ring
     const period = totp.period ?? 30;
     const remaining = period - (Math.floor(Date.now() / 1000) % period);
     const pct = remaining / period;
-    const r = 18; const circ = 2 * Math.PI * r;
+    const r    = 18;
+  const circ = 2 * Math.PI * r;
 
     row.innerHTML = `
       <div style="position:relative;width:44px;height:44px;flex-shrink:0">
@@ -248,8 +218,6 @@ function showTotpInBox(box, totps) {
   });
 }
 
-// ── Overlay helper ────────────────────────────────────────────────────────────
-
 function createOverlay() {
   const overlay = document.createElement('div');
   overlay.style.cssText = `
@@ -259,8 +227,6 @@ function createOverlay() {
   `;
   return overlay;
 }
-
-// ── Toast ─────────────────────────────────────────────────────────────────────
 
 function showToast(msg, type = 'ok') {
   const el = document.createElement('div');
@@ -277,19 +243,11 @@ function showToast(msg, type = 'ok') {
   setTimeout(() => el.remove(), 2500);
 }
 
-// ── Vault panel opener ────────────────────────────────────────────────────────
-
-/**
- * Open the Vault management page in a new tab.
- * Called from the toolbar vault button or keyboard shortcut.
- */
 export function openVaultPanel() {
   window.dispatchEvent(new CustomEvent('diatom:open-tab', {
     detail: { url: 'diatom://vault', title: 'Vault' }
   }));
 }
-
-// ── Password generator (accessible from page context via event) ───────────────
 
 window.addEventListener('diatom:generate-password', async e => {
   try {
@@ -301,10 +259,9 @@ window.addEventListener('diatom:generate-password', async e => {
   } catch {}
 });
 
-// ── Utilities ─────────────────────────────────────────────────────────────────
-
 function getInitial(title) {
   return (title ?? '?')[0]?.toUpperCase() ?? '🔑';
 }
 
 export default { onNavigate, openVaultPanel };
+

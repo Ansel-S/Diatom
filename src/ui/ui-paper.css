@@ -1,0 +1,56 @@
+:root {
+  --ink:          #23233C;
+  --ink-2:        #42425E;
+  --ink-3:        #747490;
+  --ink-4:        #AEAEC6;
+  --paper:        #EBF2FA;
+  --paper-2:      #DCE9F7;
+  --paper-3:      #CDD9F2;
+  --accent:       #C4A468;
+  --accent-l:     #D4B880;
+  --amber:        #C07830;
+  --danger:       #C44848;
+  --glass:        rgba(196, 186, 240, 0.52);
+  --glass-b:      rgba(255, 255, 255, 0.70);
+  --glass-i:      rgba(255, 255, 255, 0.52);
+  --rule:         rgba(120, 120, 190, 0.12);
+  --shadow:       0 1px 3px rgba(74, 62, 30, 0.08), 0 4px 12px rgba(100, 80, 40, 0.04);
+  --r:            6px;
+  --f-serif:      'New York', 'Iowan Old Style', Cambria, Georgia, 'Times New Roman', serif;
+  --f-sans:       -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --f-mono:       'SF Mono', 'Cascadia Code', 'Fira Code', 'DejaVu Sans Mono', monospace;
+}
+
+[data-theme="dark"] {
+  --ink:        #F2EFF8;
+  --ink-2:      #CAC6D8;
+  --ink-3:      #8A8698;
+  --ink-4:      #4C4860;
+  --paper:      #171620;
+  --paper-2:    #1F1E2C;
+  --paper-3:    #272638;
+  --accent:     #C49248;
+  --accent-l:   #D4A85E;
+  --glass:      rgba(64, 56, 102, 0.60);
+  --glass-b:    rgba(130, 120, 200, 0.24);
+  --glass-i:    rgba(160, 150, 225, 0.14);
+  --rule:       rgba(160, 150, 225, 0.08);
+  --shadow:     0 1px 4px rgba(0, 0, 0, 0.28), 0 4px 16px rgba(0, 0, 0, 0.14);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin:     0;
+  padding:    0;
+}
+
+html { font-size: 14px; }
+
+body {
+  font-family: var(--f-sans);
+  background:  var(--paper);
+  color:       var(--ink);
+  min-height:  100vh;
+}

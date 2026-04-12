@@ -1,9 +1,1 @@
-/* Diatom Boost: Focus Dark — high-contrast dark mode */
-html, body, * {
-    background-color: #0d1117 !important;
-    color: #e6edf3 !important;
-    border-color: #30363d !important;
-}
-a { color: #79c0ff !important; }
-a:visited { color: #a371f7 !important; }
-img, video { opacity: .85; filter: brightness(.95); }
+html,body,*{background-color:#0d1117 !important;color:#e6edf3 !important;border-color:#30363d !important}a{color:#79c0ff !important}a:visited{color:#a371f7 !important}img,video{opacity:.85;filter:brightness(.95)}

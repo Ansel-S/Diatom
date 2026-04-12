@@ -1,37 +1,7 @@
-/**
- * diatom/src/features/network-panel.js  — v7.1
- *
- * /devnet: real-time network request panel for Diatom.
- *
- * Shows every request intercepted by sw.js:
- *   URL · method · status · duration · blocked-by-rule (if any)
- *
- * Architecture:
- *   sw.js posts NetworkEntry events via BroadcastChannel('diatom:devnet').
- *   This panel listens, renders rows, and supports filtering.
- *
- * Activation: type /devnet in the address bar.
- * No external dependencies. Vanilla JS table, no chart libraries.
- */
 
 'use strict';
 
 import { el, qs, escHtml } from '../browser/utils.js';
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-/**
- * @typedef {object} NetworkEntry
- * @property {string}  id
- * @property {string}  url
- * @property {string}  method
- * @property {number}  status       0 = pending, -1 = blocked
- * @property {number}  durationMs
- * @property {string}  [blockedBy]  rule that blocked this request
- * @property {number}  ts           unix ms
- */
-
-// ── Panel state ───────────────────────────────────────────────────────────────
 
 let _entries  = [];   // NetworkEntry[]
 let _filter   = '';
@@ -40,8 +10,6 @@ let _bc       = null;
 let _panel    = null;
 let _tbody    = null;
 const MAX_ROWS = 500;
-
-// ── BroadcastChannel listener ─────────────────────────────────────────────────
 
 function startListening() {
   if (_bc) return;
@@ -63,12 +31,6 @@ function addEntry(entry) {
   if (_panel) renderRow(entry, true);  // prepend to table
 }
 
-// ── Panel UI ──────────────────────────────────────────────────────────────────
-
-/**
- * Open (or focus) the /devnet panel.
- * Replaces the current page content with the network panel.
- */
 export function openNetworkPanel() {
   startListening();
 
@@ -84,7 +46,6 @@ export function openNetworkPanel() {
   _panel = el('div', 'devnet-panel');
   _panel.style.cssText = 'display:flex; flex-direction:column; height:100vh; overflow:hidden;';
 
-  // Toolbar
   const toolbar = el('div', 'devnet-toolbar');
   toolbar.style.cssText = `
     display:flex; align-items:center; gap:.75rem;
@@ -135,7 +96,6 @@ export function openNetworkPanel() {
   toolbar.appendChild(clearBtn);
   toolbar.appendChild(countBadge);
 
-  // Column headers
   const thead = el('div', 'devnet-thead');
   thead.style.cssText = `
     display:grid; grid-template-columns: 40px 60px 1fr 80px 80px 160px;
@@ -148,7 +108,6 @@ export function openNetworkPanel() {
     <span>Status</span><span>Duration</span><span>Block Rule</span>
   `;
 
-  // Table body
   const tableWrap = el('div', 'devnet-table-wrap');
   tableWrap.style.cssText = 'overflow-y:auto; flex:1;';
   _tbody = el('div', 'devnet-tbody');
@@ -159,10 +118,8 @@ export function openNetworkPanel() {
   _panel.appendChild(tableWrap);
   document.body.appendChild(_panel);
 
-  // Render any buffered entries
   rebuildTable();
 
-  // Update count badge on interval
   setInterval(() => {
     if (countBadge) {
       const visible = _entries.filter(matchesFilter).length;
@@ -170,8 +127,6 @@ export function openNetworkPanel() {
     }
   }, 500);
 }
-
-// ── Table rendering ───────────────────────────────────────────────────────────
 
 function rebuildTable() {
   if (!_tbody) return;
@@ -249,11 +204,6 @@ function matchesFilter(entry) {
     || String(entry.status).includes(_filter);
 }
 
-// ── SW-side event emitter (added to sw.js) ────────────────────────────────────
-// The following code shows what sw.js must add to emit entries.
-// It is NOT executed here — it's a reference for sw.js integration.
-export const SW_INTEGRATION_CODE = /* js */`
-// In sw.js fetch handler, wrap each fetch with timing + broadcast:
 const _devnetBC = new BroadcastChannel('diatom:devnet');
 let _reqCount = 0;
 
@@ -263,4 +213,3 @@ function emitNetEntry(id, url, method, status, durationMs, blockedBy) {
     entry: { id, url, method, status, durationMs, blockedBy, ts: Date.now() },
   });
 }
-`;

@@ -13,14 +13,13 @@
       var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
       var theme = stored || (prefersDark ? 'dark' : 'light');
       document.documentElement.setAttribute('data-theme', theme);
-      // Keep in sync when system theme changes at runtime
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function (e) {
         if (!localStorage.getItem('diatom-theme')) {
           document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
         }
       });
     })();
-  </script>
+</script>
 </head>
 <body>
 

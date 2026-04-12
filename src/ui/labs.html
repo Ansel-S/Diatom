@@ -1,12 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Diatom Labs</title>
-  <!-- P0 fix: remove Google Fonts external link → load fonts locally via fonts.css -->
-  <link rel="stylesheet" href="../fonts.css">
-  <!-- P1 fix: dark-mode auto-detection -->
+<head> <meta charset="UTF-8"> <meta name="viewport" content="width=device-width, initial-scale=1"> <title>Diatom Labs</title> <!-- P0 fix: remove Google Fonts external link → load fonts locally via fonts.css --> <link rel="stylesheet" href="../fonts.css">
+<link rel="stylesheet" href="ui-paper.css"> <!-- P1 fix: dark-mode auto-detection -->
   <script type="module">
     // [FIX BUG-14] Theme via IPC (consistent with rest of Diatom; localStorage wiped by some privacy tools)
     (async function () {
@@ -30,506 +25,494 @@
     })();
   </script>
   <style>
+.header {
+  border-bottom:0.5px solid var(--rule);
+  padding:20px;
+  display:flex;
+  align-items:flex-start;
+  gap:14px;
+  position:sticky;
+  top:0;
+  background:rgba(220,233,247,0.82);
+  backdrop-filter:blur(12px);
+  z-index:100;
+  flex-direction:column;
+}
 
-    :root {
-      /* ── Lumière palette ── */
-      --ink:      #23233C;
-      --ink-2:    #42425E;
-      --ink-3:    #747490;
-      --ink-4:    #AEAEC6;
-      --paper:    #EBF2FA;
-      --paper-2:  #DCE9F7;
-      --paper-3:  #CDD9F2;
-      --accent:   #C4A468;
-      --accent-l: #D4B880;
-      --amber:    #C07830;
-      --red:      #C44848;
-      --gold:     #A8803C;
-      --glass:    rgba(196,186,240,0.52);
-      --glass-border: rgba(255,255,255,0.70);
-      --glass-inset:  rgba(255,255,255,0.52);
-      --rule:     rgba(120,120,190,0.12);
-      --shadow:   0 1px 3px rgba(74,62,30,0.08), 0 4px 12px rgba(100,80,40,0.04);
-      --shadow-gold: 0 2px 10px rgba(196,164,104,0.22), 0 6px 20px rgba(196,164,104,0.10);
-      --r:        6px;
-      /* Serif stack — now that fonts.css is loaded */
-      --f-serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
-      --f-sans:  'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-      --f-mono:  'DM Mono', 'Fira Code', 'SF Mono', monospace;
-    }
+.header-left {
+  flex:1;
+}
 
-    /* P1 fix: dark-mode tokens for labs.html */
-    [data-theme="dark"] {
-      --ink:      #F2EFF8;
-      --ink-2:    #CAC6D8;
-      --ink-3:    #8A8698;
-      --ink-4:    #4C4860;
-      --paper:    #171620;
-      --paper-2:  #1F1E2C;
-      --paper-3:  #272638;
-      --accent:   #C49248;
-      --accent-l: #D4A85E;
-      --glass:    rgba(64,56,102,0.60);
-      --glass-border: rgba(130,120,200,0.24);
-      --glass-inset:  rgba(160,150,225,0.14);
-      --rule:     rgba(160,150,225,0.08);
-      --shadow:   0 1px 4px rgba(0,0,0,0.28), 0 4px 16px rgba(0,0,0,0.14);
-    }
+.header-eyebrow {
+  font-family:monospace;
+  font-size:10px;
+  letter-spacing:0.12em;
+  text-transform:uppercase;
+  color:var(--ink-3);
+  margin-bottom:4px;
+}
 
-    /* P2 fix: prefers-reduced-motion */
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after {
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
-      }
-    }
+.header-title {
+  font-family:'New York',Cambria,Georgia,serif;
+  font-size:28px;
+  font-weight:400;
+  line-height:1;
+  color:var(--ink);
+}
 
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+.header-title em {
+  font-style:italic;
+  color:var(--accent);
+}
 
-    html { font-size: 14px; }
+.header-sub {
+  margin-top:6px;
+  font-size:12.5px;
+  color:var(--ink-3);
+  line-height:1.5;
+  max-width:480px;
+}
 
-    body {
-      font-family: 'DM Sans', system-ui, sans-serif;
-      background: var(--paper);
-      color: var(--ink);
-      min-height: 100vh;
-    }
+.header-meta {
+  text-align:left;
+  flex-shrink:0;
+}
 
-    /* ── Header ────────────────────────────────────────────────────────────── */
-    .header {
-      border-bottom: 0.5px solid var(--rule);
-      padding: 28px 40px 24px;
-      display: flex;
-      align-items: flex-end;
-      gap: 32px;
-      position: sticky;
-      top: 0;
-      background: rgba(220,233,247,0.82);
-      backdrop-filter: blur(12px);
-      z-index: 100;
-    }
+.restart-banner {
+  display:none;
+  font-family:monospace;
+  font-size:10px;
+  letter-spacing:0.06em;
+  background:var(--amber);
+  color:#fff;
+  padding:4px 10px;
+  border-radius:3px;
+  margin-bottom:8px;
+}
 
-    .header-left { flex: 1; }
+.restart-banner.visible {
+  display:block;
+}
 
-    .header-eyebrow {
-      font-family: 'DM Mono', monospace;
-      font-size: 10px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--ink-3);
-      margin-bottom: 4px;
-    }
+.filter-row {
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+}
 
-    .header-title {
-      font-family: 'Playfair Display', Georgia, serif;
-      font-size: 28px;
-      font-weight: 400;
-      line-height: 1;
-      color: var(--ink);
-    }
+.filter-btn {
+  font-family:monospace;
+  font-size:10.5px;
+  letter-spacing:0.06em;
+  border:0.5px solid var(--paper-3);
+  background:var(--paper-2);
+  color:var(--ink-2);
+  padding:5px 11px;
+  border-radius:20px;
+  cursor:pointer;
+  transition:all 0.15s;
+}
 
-    .header-title em {
-      font-style: italic;
-      color: var(--accent);
-    }
+.filter-btn:hover {
+  background:var(--paper-3);
+}
 
-    .header-sub {
-      margin-top: 6px;
-      font-size: 12.5px;
-      color: var(--ink-3);
-      line-height: 1.5;
-      max-width: 480px;
-    }
+.filter-btn.active {
+  background:var(--ink);
+  color:var(--paper);
+  border-color:var(--ink);
+}
 
-    .header-meta {
-      text-align: right;
-      flex-shrink: 0;
-    }
+.warning-strip {
+  margin:16px 20px 0;
+  border:0.5px solid rgba(184,92,0,0.25);
+  background:rgba(184,92,0,0.04);
+  border-radius:var(--r);
+  padding:12px 16px;
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
 
-    .restart-banner {
-      display: none;
-      font-family: 'DM Mono', monospace;
-      font-size: 10px;
-      letter-spacing: 0.06em;
-      background: var(--amber);
-      color: #fff;
-      padding: 4px 10px;
-      border-radius: 3px;
-      margin-bottom: 8px;
-    }
+.warning-strip-icon {
+  font-size:18px;
+  flex-shrink:0;
+}
 
-    .restart-banner.visible { display: block; }
+.warning-strip-text {
+  font-size:12px;
+  color:var(--ink-2);
+  line-height:1.5;
+}
 
-    .filter-row {
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
+.warning-strip-text strong {
+  color:var(--amber);
+  font-weight:500;
+}
 
-    .filter-btn {
-      font-family: 'DM Mono', monospace;
-      font-size: 10.5px;
-      letter-spacing: 0.06em;
-      border: 0.5px solid var(--paper-3);
-      background: var(--paper-2);
-      color: var(--ink-2);
-      padding: 5px 11px;
-      border-radius: 20px;
-      cursor: pointer;
-      transition: all 0.15s;
-    }
+.grid {
+  padding:16px 20px 40px;
+  display:grid;
+  grid-template-columns:1fr;
+  gap:14px;
+}
 
-    .filter-btn:hover { background: var(--paper-3); }
+.lab-card {
+  background:#fff;
+  border:0.5px solid var(--rule);
+  border-radius:var(--r);
+  padding:18px 20px;
+  box-shadow:var(--shadow);
+  transition:box-shadow 0.2s,transform 0.2s;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  animation:card-in 0.3s ease both;
+}
 
-    .filter-btn.active {
-      background: var(--ink);
-      color: var(--paper);
-      border-color: var(--ink);
-    }
+.lab-card:hover {
+  box-shadow:0 2px 8px rgba(0,0,0,0.08),0 8px 24px rgba(0,0,0,0.06);
+  transform:translateY(-1px);
+}
 
-    /* ── Warning strip ─────────────────────────────────────────────────────── */
-    .warning-strip {
-      margin: 20px 40px 0;
-      border: 0.5px solid rgba(184,92,0,0.25);
-      background: rgba(184,92,0,0.04);
-      border-radius: var(--r);
-      padding: 12px 16px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
+.lab-card-head {
+  display:flex;
+  align-items:flex-start;
+  gap:12px;
+}
 
-    .warning-strip-icon {
-      font-size: 18px;
-      flex-shrink: 0;
-    }
+.lab-card-titles {
+  flex:1;
+}
 
-    .warning-strip-text {
-      font-size: 12px;
-      color: var(--ink-2);
-      line-height: 1.5;
-    }
+.lab-name {
+  font-size:13.5px;
+  font-weight:500;
+  color:var(--ink);
+  line-height:1.3;
+}
 
-    .warning-strip-text strong {
-      color: var(--amber);
-      font-weight: 500;
-    }
+.lab-tags {
+  display:flex;
+  gap:5px;
+  margin-top:5px;
+  flex-wrap:wrap;
+}
 
-    /* ── Main grid ─────────────────────────────────────────────────────────── */
-    .grid {
-      padding: 28px 40px 60px;
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-      gap: 14px;
-    }
+.tag {
+  font-family:monospace;
+  font-size:9px;
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+  padding:2px 7px;
+  border-radius:3px;
+  font-weight:400;
+}
 
-    /* ── Lab card ──────────────────────────────────────────────────────────── */
-    .lab-card {
-      background: #fff;
-      border: 0.5px solid var(--rule);
-      border-radius: var(--r);
-      padding: 18px 20px;
-      box-shadow: var(--shadow);
-      transition: box-shadow 0.2s, transform 0.2s;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
+.tag-category {
+  background:var(--paper-2);
+  color:var(--ink-3);
+  border:0.5px solid var(--paper-3);
+}
 
-    .lab-card:hover {
-      box-shadow: 0 2px 8px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06);
-      transform: translateY(-1px);
-    }
+.tag-alpha {
+  background:rgba(139,26,26,0.08);
+  color:var(--red);
+  border:0.5px solid rgba(139,26,26,0.15);
+}
 
-    .lab-card-head {
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-    }
+.tag-beta {
+  background:rgba(184,92,0,0.08);
+  color:var(--amber);
+  border:0.5px solid rgba(184,92,0,0.15);
+}
 
-    .lab-card-titles { flex: 1; }
+.tag-stable {
+  background:rgba(26,71,42,0.08);
+  color:var(--accent);
+  border:0.5px solid rgba(26,71,42,0.15);
+}
 
-    .lab-name {
-      font-size: 13.5px;
-      font-weight: 500;
-      color: var(--ink);
-      line-height: 1.3;
-    }
+.tag-version {
+  background:var(--paper-2);
+  color:var(--ink-4);
+  border:0.5px solid var(--paper-3);
+}
 
-    .lab-tags {
-      display: flex;
-      gap: 5px;
-      margin-top: 5px;
-      flex-wrap: wrap;
-    }
+.toggle-wrap {
+  flex-shrink:0;
+  padding-top:1px;
+}
 
-    .tag {
-      font-family: 'DM Mono', monospace;
-      font-size: 9px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      padding: 2px 7px;
-      border-radius: 3px;
-      font-weight: 400;
-    }
+.toggle {
+  position:relative;
+  width:40px;
+  height:22px;
+}
 
-    .tag-category {
-      background: var(--paper-2);
-      color: var(--ink-3);
-      border: 0.5px solid var(--paper-3);
-    }
+.toggle input {
+  opacity:0;
+  width:0;
+  height:0;
+}
 
-    .tag-alpha   { background: rgba(139,26,26,0.08); color: var(--red); border: 0.5px solid rgba(139,26,26,0.15); }
-    .tag-beta    { background: rgba(184,92,0,0.08);  color: var(--amber); border: 0.5px solid rgba(184,92,0,0.15); }
-    .tag-stable  { background: rgba(26,71,42,0.08); color: var(--accent); border: 0.5px solid rgba(26,71,42,0.15); }
-    .tag-version { background: var(--paper-2); color: var(--ink-4); border: 0.5px solid var(--paper-3); }
+.toggle-track {
+  position:absolute;
+  inset:0;
+  background:var(--paper-3);
+  border-radius:11px;
+  cursor:pointer;
+  transition:background 0.2s;
+  border:0.5px solid var(--rule);
+}
 
-    /* Toggle switch */
-    .toggle-wrap {
-      flex-shrink: 0;
-      padding-top: 1px;
-    }
+.toggle input:checked+.toggle-track {
+  background:var(--accent);
+  border-color:var(--accent);
+}
 
-    .toggle {
-      position: relative;
-      width: 40px;
-      height: 22px;
-    }
+.toggle-track::after {
+  content:'';
+  position:absolute;
+  left:3px;
+  top:3px;
+  width:14px;
+  height:14px;
+  border-radius:50%;
+  background:#fff;
+  box-shadow:0 1px 3px rgba(0,0,0,0.2);
+  transition:transform 0.2s cubic-bezier(0.4,0,0.2,1);
+}
 
-    .toggle input { opacity: 0; width: 0; height: 0; }
+.toggle input:checked+.toggle-track::after {
+  transform:translateX(18px);
+}
 
-    .toggle-track {
-      position: absolute;
-      inset: 0;
-      background: var(--paper-3);
-      border-radius: 11px;
-      cursor: pointer;
-      transition: background 0.2s;
-      border: 0.5px solid var(--rule);
-    }
+.lab-desc {
+  font-size:12px;
+  color:var(--ink-2);
+  line-height:1.6;
+}
 
-    .toggle input:checked + .toggle-track {
-      background: var(--accent);
-      border-color: var(--accent);
-    }
+.risk-strip {
+  display:flex;
+  align-items:flex-start;
+  gap:8px;
+  padding:9px 11px;
+  border-radius:4px;
+  margin-top:2px;
+}
 
-    .toggle-track::after {
-      content: '';
-      position: absolute;
-      left: 3px;
-      top: 3px;
-      width: 14px;
-      height: 14px;
-      border-radius: 50%;
-      background: #fff;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-      transition: transform 0.2s cubic-bezier(0.4,0,0.2,1);
-    }
+.risk-low {
+  background:rgba(26,71,42,0.05);
+  border:0.5px solid rgba(26,71,42,0.12);
+}
 
-    .toggle input:checked + .toggle-track::after {
-      transform: translateX(18px);
-    }
+.risk-medium {
+  background:rgba(184,92,0,0.05);
+  border:0.5px solid rgba(184,92,0,0.12);
+}
 
-    .lab-desc {
-      font-size: 12px;
-      color: var(--ink-2);
-      line-height: 1.6;
-    }
+.risk-high {
+  background:rgba(139,26,26,0.05);
+  border:0.5px solid rgba(139,26,26,0.12);
+}
 
-    /* Risk strip */
-    .risk-strip {
-      display: flex;
-      align-items: flex-start;
-      gap: 8px;
-      padding: 9px 11px;
-      border-radius: 4px;
-      margin-top: 2px;
-    }
+.risk-dot {
+  width:6px;
+  height:6px;
+  border-radius:50%;
+  flex-shrink:0;
+  margin-top:4px;
+}
 
-    .risk-low    { background: rgba(26,71,42,0.05); border: 0.5px solid rgba(26,71,42,0.12); }
-    .risk-medium { background: rgba(184,92,0,0.05); border: 0.5px solid rgba(184,92,0,0.12); }
-    .risk-high   { background: rgba(139,26,26,0.05); border: 0.5px solid rgba(139,26,26,0.12); }
+.risk-low .risk-dot {
+  background:var(--accent);
+}
 
-    .risk-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      flex-shrink: 0;
-      margin-top: 4px;
-    }
+.risk-medium .risk-dot {
+  background:var(--amber);
+}
 
-    .risk-low .risk-dot    { background: var(--accent); }
-    .risk-medium .risk-dot { background: var(--amber); }
-    .risk-high .risk-dot   { background: var(--red); }
+.risk-high .risk-dot {
+  background:var(--red);
+}
 
-    .risk-text {
-      font-size: 11px;
-      color: var(--ink-3);
-      line-height: 1.5;
-    }
+.risk-text {
+  font-size:11px;
+  color:var(--ink-3);
+  line-height:1.5;
+}
 
-    .risk-label {
-      font-family: 'DM Mono', monospace;
-      font-size: 9px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      font-weight: 500;
-      display: block;
-      margin-bottom: 2px;
-    }
+.risk-label {
+  font-family:monospace;
+  font-size:9px;
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+  font-weight:500;
+  display:block;
+  margin-bottom:2px;
+}
 
-    .risk-low .risk-label    { color: var(--accent); }
-    .risk-medium .risk-label { color: var(--amber); }
-    .risk-high .risk-label   { color: var(--red); }
+.risk-low .risk-label {
+  color:var(--accent);
+}
 
-    /* Section dividers */
-    .section-header {
-      grid-column: 1 / -1;
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      margin-top: 8px;
-    }
+.risk-medium .risk-label {
+  color:var(--amber);
+}
 
-    .section-label {
-      font-family: 'DM Mono', monospace;
-      font-size: 10px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--ink-4);
-      white-space: nowrap;
-    }
+.risk-high .risk-label {
+  color:var(--red);
+}
 
-    .section-line {
-      flex: 1;
-      height: 0.5px;
-      background: var(--rule);
-    }
+.section-header {
+  grid-column:1 / -1;
+  display:flex;
+  align-items:center;
+  gap:14px;
+  margin-top:8px;
+}
 
-    .section-count {
-      font-family: 'DM Mono', monospace;
-      font-size: 10px;
-      color: var(--ink-4);
-    }
+.section-label {
+  font-family:monospace;
+  font-size:10px;
+  letter-spacing:0.12em;
+  text-transform:uppercase;
+  color:var(--ink-4);
+  white-space:nowrap;
+}
 
-    /* ── Empty state ───────────────────────────────────────────────────────── */
-    .empty-state {
-      grid-column: 1 / -1;
-      text-align: center;
-      padding: 60px 20px;
-    }
+.section-line {
+  flex:1;
+  height:0.5px;
+  background:var(--rule);
+}
 
-    .empty-state-glyph {
-      font-family: 'Playfair Display', Georgia, serif;
-      font-size: 48px;
-      color: var(--paper-3);
-      display: block;
-      margin-bottom: 12px;
-    }
+.section-count {
+  font-family:monospace;
+  font-size:10px;
+  color:var(--ink-4);
+}
 
-    .empty-state-text {
-      font-size: 13px;
-      color: var(--ink-4);
-    }
+.empty-state {
+  grid-column:1 / -1;
+  text-align:center;
+  padding:60px 20px;
+}
 
-    /* ── Footer ─────────────────────────────────────────────────────────────── */
-    .footer {
-      border-top: 0.5px solid var(--rule);
-      padding: 16px 40px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
+.empty-state-glyph {
+  font-family:'New York',Cambria,Georgia,serif;
+  font-size:48px;
+  color:var(--paper-3);
+  display:block;
+  margin-bottom:12px;
+}
 
-    .footer-left {
-      font-family: 'DM Mono', monospace;
-      font-size: 10px;
-      color: var(--ink-4);
-      letter-spacing: 0.05em;
-    }
+.empty-state-text {
+  font-size:13px;
+  color:var(--ink-4);
+}
 
-    .footer-link {
-      font-size: 11px;
-      color: var(--ink-3);
-      text-decoration: none;
-      border-bottom: 0.5px solid var(--ink-4);
-      padding-bottom: 1px;
-      transition: color 0.15s, border-color 0.15s;
-    }
+.footer {
+  border-top:0.5px solid var(--rule);
+  padding:14px 20px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+}
 
-    .footer-link:hover { color: var(--ink); border-color: var(--ink); }
+.footer-left {
+  font-family:monospace;
+  font-size:10px;
+  color:var(--ink-4);
+  letter-spacing:0.05em;
+}
 
-    /* ── Reveal animation ───────────────────────────────────────────────────── */
-    @keyframes card-in {
-      from { opacity: 0; transform: translateY(8px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
+.footer-link {
+  font-size:11px;
+  color:var(--ink-3);
+  text-decoration:none;
+  border-bottom:0.5px solid var(--ink-4);
+  padding-bottom:1px;
+  transition:color 0.15s,border-color 0.15s;
+}
 
-    .lab-card { animation: card-in 0.3s ease both; }
+.footer-link:hover {
+  color:var(--ink);
+  border-color:var(--ink);
+}
 
-    /* Stagger via nth-child */
-    .lab-card:nth-child(1)  { animation-delay: 0.00s; }
-    .lab-card:nth-child(2)  { animation-delay: 0.03s; }
-    .lab-card:nth-child(3)  { animation-delay: 0.06s; }
-    .lab-card:nth-child(4)  { animation-delay: 0.09s; }
-    .lab-card:nth-child(5)  { animation-delay: 0.12s; }
-    .lab-card:nth-child(6)  { animation-delay: 0.15s; }
-    .lab-card:nth-child(7)  { animation-delay: 0.18s; }
-    .lab-card:nth-child(8)  { animation-delay: 0.21s; }
-    .lab-card:nth-child(9)  { animation-delay: 0.24s; }
-    .lab-card:nth-child(10) { animation-delay: 0.27s; }
-    .lab-card:nth-child(11) { animation-delay: 0.30s; }
-    .lab-card:nth-child(12) { animation-delay: 0.33s; }
+from {
+  opacity:0;
+  transform:translateY(8px);
+}
 
-    /* ── Responsive ─────────────────────────────────────────────────────────── */
-    @media (max-width: 640px) {
-      .header { padding: 20px; flex-direction: column; align-items: flex-start; gap: 14px; }
-      .header-meta { text-align: left; }
-      .grid { padding: 16px 20px 40px; grid-template-columns: 1fr; }
-      .warning-strip { margin: 16px 20px 0; }
-      .footer { padding: 14px 20px; }
-    }
-  </style>
+to {
+  opacity:1;
+  transform:translateY(0);
+}
+
+.lab-card:nth-child(1) {
+  animation-delay:0.00s;
+}
+
+.lab-card:nth-child(2) {
+  animation-delay:0.03s;
+}
+
+.lab-card:nth-child(3) {
+  animation-delay:0.06s;
+}
+
+.lab-card:nth-child(4) {
+  animation-delay:0.09s;
+}
+
+.lab-card:nth-child(5) {
+  animation-delay:0.12s;
+}
+
+.lab-card:nth-child(6) {
+  animation-delay:0.15s;
+}
+
+.lab-card:nth-child(7) {
+  animation-delay:0.18s;
+}
+
+.lab-card:nth-child(8) {
+  animation-delay:0.21s;
+}
+
+.lab-card:nth-child(9) {
+  animation-delay:0.24s;
+}
+
+.lab-card:nth-child(10) {
+  animation-delay:0.27s;
+}
+
+.lab-card:nth-child(11) {
+  animation-delay:0.30s;
+}
+
+.lab-card:nth-child(12) {
+  animation-delay:0.33s;
+}
+
+</style>
 </head>
-<body>
-
-  <header class="header">
-    <div class="header-left">
-      <div class="header-eyebrow">diatom://labs</div>
-      <h1 class="header-title">Experimental <em>Features</em></h1>
-      <p class="header-sub">
+<body> <header class="header"> <div class="header-left"> <div class="header-eyebrow">diatom://labs</div> <h1 class="header-title">Experimental <em>Features</em></h1> <p class="header-sub">
         Precision instruments, not debug toggles. Each experiment is honest
         about its stability and trade-offs.
-      </p>
-    </div>
-    <div class="header-meta">
-      <div class="restart-banner" id="restartBanner">↺ restart required</div>
-      <div class="filter-row" id="filterRow">
-        <button class="filter-btn active" data-cat="all">All</button>
-      </div>
-    </div>
-  </header>
-
-  <div class="warning-strip">
-    <span class="warning-strip-icon">⚗️</span>
-    <p class="warning-strip-text">
-      <strong>These features are experimental.</strong>
+      </p> </div> <div class="header-meta"> <div class="restart-banner" id="restartBanner">↺ restart required</div> <div class="tab-limit-row" style="margin-top:.6rem;display:flex;align-items:center;gap:.5rem;font-size:12px;color:var(--ink-3);"> <label for="tabLimitInput" style="white-space:nowrap;">Max Tabs</label> <input type="number" id="tabLimitInput" min="1" max="50" value="13"
+          style="width:3.5rem;background:var(--paper-2);border:1px solid var(--rule);color:var(--ink);border-radius:4px;padding:.2rem .4rem;font-family:monospace;font-size:12px;text-align:center;"
+        > </div> <div class="filter-row" id="filterRow"> <button class="filter-btn active" data-cat="all">All</button> </div> </div> </header> <div class="warning-strip"> <span class="warning-strip-icon">⚗️</span> <p class="warning-strip-text"> <strong>These features are experimental.</strong>
       Alpha features may break pages or behave unexpectedly.
       Each card shows the risk level and what can go wrong.
       Settings persist across restarts.
-    </p>
-  </div>
-
-  <main class="grid" id="grid">
-    <p style="color: var(--ink-4); font-size:13px; padding: 40px 0;">Loading labs…</p>
-  </main>
-
-  <footer class="footer">
-    <span class="footer-left" id="countLabel">— labs</span>
-    <a class="footer-link" href="https://github.com/diatom-browser/diatom" target="_blank">View source on GitHub</a>
-  </footer>
-
+    </p> </div> <main class="grid" id="grid"> <p style="color: var(--ink-4); font-size:13px; padding: 40px 0;">Loading labs…</p> </main> <footer class="footer"> <span class="footer-left" id="countLabel">— labs</span> <a class="footer-link" href="https://github.com/diatom-browser/diatom" target="_blank">View source on GitHub</a> </footer>
 <script type="module">
   // ── Data ─────────────────────────────────────────────────────────────────────
   // In production: loaded from Tauri via __TAURI__.invoke('cmd_labs_list')
@@ -728,65 +711,236 @@
 
   // ── Seed data (dev fallback) ──────────────────────────────────────────────
   const SEED_LABS = [
-    { id: 'slm_server', name: 'Local AI Microkernel', description: 'Starts an OpenAI-compatible API server at 127.0.0.1:11435, making Diatom\'s curated SLMs available to any local app.', category: 'AI', stability: 'beta', risk: 'low', risk_note: 'Opens a local TCP port. Bound to loopback — not accessible from the network.', enabled: false, restart_required: true, added_in: 'v0.9.0' },
-    { id: 'slm_extreme_privacy', name: 'AI Extreme Privacy Mode', description: 'Forces all AI inference to run in the Wasm sandbox. Disables Ollama and llama.cpp backends.', category: 'AI', stability: 'alpha', risk: 'low', risk_note: 'Wasm inference is 5–20× slower than native. Only works for short prompts.', enabled: false, restart_required: false, added_in: 'v0.9.0' },
-    { id: 'page_summarise', name: 'Instant Page Summariser', description: 'Adds a ⌘K shortcut that summarises the current page using the active SLM.', category: 'AI', stability: 'beta', risk: 'low', risk_note: 'Page content is sent to the local model only — never to external servers.', enabled: false, restart_required: false, added_in: 'v0.9.0' },
-    { id: 'dynamic_tab_budget', name: 'Adaptive Tab Limit', description: 'Replaces the fixed 10-tab limit with a memory-aware formula. Ultrawide monitors get up to 13 tabs; phones get 3.', category: 'Performance', stability: 'beta', risk: 'low', risk_note: 'Budget recalculates every 60 seconds.', enabled: true, restart_required: false, added_in: 'v0.9.0' },
-    { id: 'golden_ratio_zones', name: 'Golden Ratio Tab Zones', description: 'Divides your tab budget into a Focus zone (61.8%) and a Buffer zone (38.2%).', category: 'Performance', stability: 'beta', risk: 'low', risk_note: 'None. Cosmetic behavioural change only.', enabled: true, restart_required: false, added_in: 'v0.9.0' },
-    { id: 'entropy_sleep', name: 'Entropy-Reduction Sleep', description: 'As tabs approach the budget limit, the auto-sleep timer shortens and the heaviest tab is prioritised.', category: 'Performance', stability: 'stable', risk: 'low', risk_note: 'May surprise users who expect tabs to stay alive longer under load.', enabled: true, restart_required: false, added_in: 'v0.9.0' },
-    { id: 'pqc_envelope', name: 'Post-Quantum Freeze Encryption', description: 'Encrypts Museum bundles with Kyber-768 + AES-256-GCM hybrid envelope.', category: 'Privacy', stability: 'beta', risk: 'low', risk_note: 'Bundles encrypted with this flag cannot be decrypted by older Diatom versions.', enabled: false, restart_required: false, added_in: 'v0.8.0' },
-    { id: 'ohttp_decoy', name: 'OHTTP Decoy Relay (Legacy)', description: '[Superseded by OHTTP Full in v0.10.0] Routes privacy-noise requests through Oblivious HTTP relays. Decoy-only — response decapsulation not implemented in this variant. Enable OHTTP Full (v0.10.0) for complete RFC 9458 support.', category: 'Privacy', stability: 'alpha', risk: 'medium', risk_note: 'Superseded by ohttp_full lab in v0.10.0. Kept for rollback compatibility.', enabled: false, restart_required: false, added_in: 'v0.8.0' },
-    { id: 'zkp_age_gate', name: 'Zero-Knowledge Age Verification', description: 'Proves you are over 18 to participating sites without revealing your birth year.', category: 'Privacy', stability: 'alpha', risk: 'high', risk_note: 'Sites must opt-in to accept ZK-Proof headers.', enabled: false, restart_required: false, added_in: 'v0.8.0' },
-    { id: 'timezone_spoof', name: 'Timezone Normalisation', description: 'Overrides JavaScript timezone APIs to report UTC.', category: 'Privacy', stability: 'beta', risk: 'medium', risk_note: 'Calendar apps and trading platforms may display incorrect times.', enabled: false, restart_required: false, added_in: 'v0.9.0' },
-    { id: 'jitter_all_requests', name: 'Global Request Jitter', description: 'Adds 0–50ms cryptographic random delay to every outbound request.', category: 'Privacy', stability: 'stable', risk: 'low', risk_note: 'Adds up to 50ms latency per request.', enabled: false, restart_required: false, added_in: 'v0.8.0' },
-    { id: 'crdt_museum_sync', name: 'P2P Museum Sync (Legacy Stub)', description: '[Superseded by Noise P2P Museum Sync in v0.10.0] Original WebRTC framework stub — no actual data transfer. Enable "Noise P2P Museum Sync" for the real implementation.', category: 'Sync', stability: 'alpha', risk: 'medium', risk_note: 'Framework stubs only — no data is transmitted. Kept for rollback. Use noise_p2p_sync instead.', enabled: false, restart_required: false, added_in: 'v0.8.0' },
-    { id: 'tos_auditor', name: 'ToS Red-Flag Auditor',
-      description: 'Automatically extracts and analyses privacy policies on registration pages. Flags dangerous clauses: AI training consent, data sharing, perpetual IP licences, binding arbitration. Keyboard shortcut ⌘⇧T audits any page. Entirely local — no cloud processing.',
-      category: 'Privacy', stability: 'stable', risk: 'low',
-      risk_note: 'Analysis is heuristic-based. Always read the full policy for legal matters.',
-      enabled: true, restart_required: false, added_in: 'v0.9.8' },
-    { id: 'shadow_index', name: 'Shadow Index — Human-Curated Search',
-      description: 'Full-text TF-IDF search over your Museum archive. Open with ⌘⇧F. Results ranked by personal curation quality, not SEO. Bias Contrast View groups results by estimated political lean to surface opposing perspectives. Freeze any page with ⌘⇧S.',
-      category: 'Discovery', stability: 'beta', risk: 'low',
-      risk_note: 'Local mode is fully offline. P2P mode (future) will broadcast anonymised keyword hashes only.',
-      enabled: false, restart_required: false, added_in: 'v0.9.8' },
-    { id: 'bloom_startup', name: 'Bloom Startup Animation', description: 'Displays a procedural geometric animation on first load. Pure CSS — zero JavaScript.', category: 'Interface', stability: 'stable', risk: 'low', risk_note: 'None.', enabled: true, restart_required: false, added_in: 'v0.9.0' },
-    { id: 'screen_gravity', name: 'Screen Gravity Tab Ceiling', description: 'Automatically adjusts the maximum tab count based on display width.', category: 'Interface', stability: 'beta', risk: 'low', risk_note: 'The ceiling adjusts within 60 seconds of a window resize.', enabled: true, restart_required: false, added_in: 'v0.9.0' },
+  {
+    id: 'slm_server',
+    name: 'Local AI Microkernel',
+    description: 'Starts an OpenAI-compatible API server at 127.0.0.1:11435, making Diatom\'s curated SLMs available to any local app.',
+    category: 'AI',
+    stability: 'beta',
+    risk: 'low',
+    risk_note: 'Opens a local TCP port. Bound to loopback — not accessible from the network.',
+    enabled: false,
+    restart_required: true,
+    added_in: 'v0.9.0'
+  },
+  {
+    id: 'slm_extreme_privacy',
+    name: 'AI Extreme Privacy Mode',
+    description: 'Forces all AI inference to run in the Wasm sandbox. Disables Ollama and llama.cpp backends.',
+    category: 'AI',
+    stability: 'alpha',
+    risk: 'low',
+    risk_note: 'Wasm inference is 5–20× slower than native. Only works for short prompts.',
+    enabled: false,
+    restart_required: false,
+    added_in: 'v0.9.0'
+  },
+  {
+    id: 'page_summarise',
+    name: 'Instant Page Summariser',
+    description: 'Adds a ⌘K shortcut that summarises the current page using the active SLM.',
+    category: 'AI',
+    stability: 'beta',
+    risk: 'low',
+    risk_note: 'Page content is sent to the local model only — never to external servers.',
+    enabled: false,
+    restart_required: false,
+    added_in: 'v0.9.0'
+  },
+  {
+    id: 'entropy_sleep',
+    name: 'Entropy-Reduction Sleep',
+    description: 'As tabs approach the budget limit, the auto-sleep timer shortens and the heaviest tab is prioritised.',
+    category: 'Performance',
+    stability: 'stable',
+    risk: 'low',
+    risk_note: 'May surprise users who expect tabs to stay alive longer under load.',
+    enabled: true,
+    restart_required: false,
+    added_in: 'v0.9.0'
+  },
+  {
+    id: 'pqc_envelope',
+    name: 'Post-Quantum Freeze Encryption',
+    description: 'Encrypts Museum bundles with Kyber-768 + AES-256-GCM hybrid envelope.',
+    category: 'Privacy',
+    stability: 'beta',
+    risk: 'low',
+    risk_note: 'Bundles encrypted with this flag cannot be decrypted by older Diatom versions.',
+    enabled: false,
+    restart_required: false,
+    added_in: 'v0.8.0'
+  },
+  {
+    id: 'ohttp_decoy',
+    name: 'OHTTP Decoy Relay (Legacy)',
+    description: '[Superseded by OHTTP Full in v0.10.0] Routes privacy-noise requests through Oblivious HTTP relays. Decoy-only — response decapsulation not implemented in this variant. Enable OHTTP Full (v0.10.0) for complete RFC 9458 support.',
+    category: 'Privacy',
+    stability: 'alpha',
+    risk: 'medium',
+    risk_note: 'Superseded by ohttp_full lab in v0.10.0. Kept for rollback compatibility.',
+    enabled: false,
+    restart_required: false,
+    added_in: 'v0.8.0'
+  },
+  {
+    id: 'zkp_age_gate',
+    name: 'Zero-Knowledge Age Verification',
+    description: 'Proves you are over 18 to participating sites without revealing your birth year.',
+    category: 'Privacy',
+    stability: 'alpha',
+    risk: 'high',
+    risk_note: 'Sites must opt-in to accept ZK-Proof headers.',
+    enabled: false,
+    restart_required: false,
+    added_in: 'v0.8.0'
+  },
+  {
+    id: 'timezone_spoof',
+    name: 'Timezone Normalisation',
+    description: 'Overrides JavaScript timezone APIs to report UTC.',
+    category: 'Privacy',
+    stability: 'beta',
+    risk: 'medium',
+    risk_note: 'Calendar apps and trading platforms may display incorrect times.',
+    enabled: false,
+    restart_required: false,
+    added_in: 'v0.9.0'
+  },
+  {
+    id: 'jitter_all_requests',
+    name: 'Global Request Jitter',
+    description: 'Adds 0–50ms cryptographic random delay to every outbound request.',
+    category: 'Privacy',
+    stability: 'stable',
+    risk: 'low',
+    risk_note: 'Adds up to 50ms latency per request.',
+    enabled: false,
+    restart_required: false,
+    added_in: 'v0.8.0'
+  },
+  {
+    id: 'crdt_museum_sync',
+    name: 'P2P Museum Sync (Legacy Stub)',
+    description: '[Superseded by Noise P2P Museum Sync in v0.10.0] Original WebRTC framework stub — no actual data transfer. Enable "Noise P2P Museum Sync" for the real implementation.',
+    category: 'Sync',
+    stability: 'alpha',
+    risk: 'medium',
+    risk_note: 'Framework stubs only — no data is transmitted. Kept for rollback. Use noise_p2p_sync instead.',
+    enabled: false,
+    restart_required: false,
+    added_in: 'v0.8.0'
+  },
+  {
+    { id: 'tos_auditor',
+    name: 'ToS Red-Flag Auditor'
+  },
+  description: 'Automatically extracts and analyses privacy policies on registration pages. Flags dangerous clauses: AI training consent, data sharing, perpetual IP licences, binding arbitration. Keyboard shortcut ⌘⇧T audits any page. Entirely local — no cloud processing.',
+  category: 'Privacy', stability: 'stable', risk: 'low',
+  risk_note: 'Analysis is heuristic-based. Always read the full policy for legal matters.',
+  enabled: true, restart_required: false, added_in: 'v0.9.8' },
+  {
+    { id: 'shadow_index',
+    name: 'Shadow Index — Human-Curated Search'
+  },
+  description: 'Full-text TF-IDF search over your Museum archive. Open with ⌘⇧F. Results ranked by personal curation quality, not SEO. Bias Contrast View groups results by estimated political lean to surface opposing perspectives. Freeze any page with ⌘⇧S.',
+  category: 'Discovery', stability: 'beta', risk: 'low',
+  risk_note: 'Local mode is fully offline. P2P mode (future) will broadcast anonymised keyword hashes only.',
+  enabled: false, restart_required: false, added_in: 'v0.9.8' },
+  {
+    id: 'bloom_startup',
+    name: 'Bloom Startup Animation',
+    description: 'Displays a procedural geometric animation on first load. Pure CSS — zero JavaScript.',
+    category: 'Interface',
+    stability: 'stable',
+    risk: 'low',
+    risk_note: 'None.',
+    enabled: true,
+    restart_required: false,
+    added_in: 'v0.9.0'
+  },
+  // ── v0.10.0 Labs ──────────────────────────────────────────────────────────
+  {
+    { id: 'noise_p2p_sync',
+    name: 'Noise P2P Museum Sync',
+    description: 'Enables fully-functional peer-to-peer Museum synchronisation over Noise_XX encrypted channels. Replaces the previous WebRTC stub — actual data now transfers between peers with mutual authentication and forward secrecy. No relay server.'
+  },
+  category: 'Sync', stability: 'beta', risk: 'low',
+  risk_note: 'Requires both devices to be on the same network or have WAN connectivity. TOFU fingerprint verification shown on first connect.',
+  enabled: false, restart_required: false, added_in: 'v0.10.0' },
+  {
+    { id: 'pir_blocklist',
+    name: 'PIR Blocklist Fetch',
+    description: 'Fetches filter list updates using Private Information Retrieval cover-traffic: each real download is accompanied by 2 decoy fetches from the catalogue, so the server cannot determine which blocklist Diatom actually uses.'
+  },
+  category: 'Privacy', stability: 'beta', risk: 'low',
+  risk_note: 'Uses 3× bandwidth for filter list updates (typically < 100 KB/week total). Decoy responses are discarded.',
+  enabled: false, restart_required: false, added_in: 'v0.10.0' },
+  {
+    { id: 'ohttp_full',
+    name: 'Oblivious HTTP (Full)',
+    description: 'Upgrades OHTTP from decoy-only to a complete RFC 9458 implementation with response decapsulation. All outbound privacy-noise requests, blocklist fetches, and RSS updates are routed through an OHTTP relay — origin servers see the relay IP, not yours.'
+  },
+  category: 'Privacy', stability: 'beta', risk: 'medium',
+  risk_note: 'Adds ~50–200ms latency per relayed request. Relay (Fastly or Brave) sees your IP and the target server name, but not request content.',
+  enabled: false, restart_required: false, added_in: 'v0.10.0' },
+  {
+    { id: 'plugin_sandbox',
+    name: 'Wasm Plugin Sandbox',
+    description: 'Enables the Wasm Component Model plugin system. Install third-party .wasm plugins from any source — each runs in an isolated sandbox with 16 MB memory, 100ms CPU budget, and zero network or filesystem access.'
+  },
+  category: 'Interface', stability: 'alpha', risk: 'low',
+  risk_note: 'Plugins are sandboxed and cannot exfiltrate data. Requires the plugin-sandbox Cargo feature. Binary size increases by ~4 MB when feature is active.',
+  enabled: false, restart_required: true, added_in: 'v0.10.0' },
+  {
+    { id: 'power_budget',
+    name: 'Adaptive Power Scheduling',
+    description: 'Reduces background task frequency on battery: Sentinel slows from 1h to 3h intervals, tab-budget from 1min to 5min, and decoy cover traffic is disabled when battery is low (≤20%). All normal browsing is unaffected.'
+  },
+  category: 'Performance', stability: 'stable', risk: 'low',
+  risk_note: 'None. Background tasks only. Browsing performance is unchanged.',
+  enabled: true, restart_required: false, added_in: 'v0.11.0' },
+  {
+    { id: 'etag_cache',
+    name: 'Conditional Filter List Fetch',
+    description: 'Sends ETag/If-None-Match on blocklist updates. If the list has not changed since last download, the server sends 304 Not Modified — no data transferred. Saves ~1 MB/week on EasyList + EasyPrivacy.'
+  },
+  category: 'Performance', stability: 'stable', risk: 'low',
+  risk_note: 'None. Standard HTTP caching behaviour.',
+  enabled: true, restart_required: false, added_in: 'v0.11.0' },
+  {
+    { id: 'ipc_batch',
+    name: 'IPC Call Batching',
+    description: 'Coalesces high-frequency IPC calls (reading events, noise seed) within a single animation frame. Cuts IPC round-trips by ~60% during active scrolling, reducing CPU usage and improving scroll smoothness.'
+  },
+  category: 'Performance', stability: 'beta', risk: 'low',
+  risk_note: 'None. Batched calls deliver the same data with lower frequency.',
+  enabled: true, restart_required: false, added_in: 'v0.11.0' },
+];
 
-    // ── v0.10.0 Labs ──────────────────────────────────────────────────────────
-    { id: 'noise_p2p_sync', name: 'Noise P2P Museum Sync', description: 'Enables fully-functional peer-to-peer Museum synchronisation over Noise_XX encrypted channels. Replaces the previous WebRTC stub — actual data now transfers between peers with mutual authentication and forward secrecy. No relay server.',
-      category: 'Sync', stability: 'beta', risk: 'low',
-      risk_note: 'Requires both devices to be on the same network or have WAN connectivity. TOFU fingerprint verification shown on first connect.',
-      enabled: false, restart_required: false, added_in: 'v0.10.0' },
-    { id: 'echo_dp', name: 'Echo Differential Privacy', description: 'Adds mathematically proven ε-DP Laplace noise to all Echo output values before they are stored or displayed. Prevents reconstruction of individual browsing events from the persona time-series even with unlimited output observations.',
-      category: 'Privacy', stability: 'stable', risk: 'low',
-      risk_note: 'Noise is calibrated below UI display precision (< 0.01 per axis at ≥ 50 events/week). The privacy budget (ε) is configurable in Settings → Echo.',
-      enabled: true, restart_required: false, added_in: 'v0.10.0' },
-    { id: 'pir_blocklist', name: 'PIR Blocklist Fetch', description: 'Fetches filter list updates using Private Information Retrieval cover-traffic: each real download is accompanied by 2 decoy fetches from the catalogue, so the server cannot determine which blocklist Diatom actually uses.',
-      category: 'Privacy', stability: 'beta', risk: 'low',
-      risk_note: 'Uses 3× bandwidth for filter list updates (typically < 100 KB/week total). Decoy responses are discarded.',
-      enabled: false, restart_required: false, added_in: 'v0.10.0' },
-    { id: 'ohttp_full', name: 'Oblivious HTTP (Full)', description: 'Upgrades OHTTP from decoy-only to a complete RFC 9458 implementation with response decapsulation. All outbound privacy-noise requests, blocklist fetches, and RSS updates are routed through an OHTTP relay — origin servers see the relay IP, not yours.',
-      category: 'Privacy', stability: 'beta', risk: 'medium',
-      risk_note: 'Adds ~50–200ms latency per relayed request. Relay (Fastly or Brave) sees your IP and the target server name, but not request content.',
-      enabled: false, restart_required: false, added_in: 'v0.10.0' },
-    { id: 'plugin_sandbox', name: 'Wasm Plugin Sandbox', description: 'Enables the Wasm Component Model plugin system. Install third-party .wasm plugins from any source — each runs in an isolated sandbox with 16 MB memory, 100ms CPU budget, and zero network or filesystem access.',
-      category: 'Interface', stability: 'alpha', risk: 'low',
-      risk_note: 'Plugins are sandboxed and cannot exfiltrate data. Requires the plugin-sandbox Cargo feature. Binary size increases by ~4 MB when feature is active.',
-      enabled: false, restart_required: true, added_in: 'v0.10.0' },
-    { id: 'power_budget', name: 'Adaptive Power Scheduling', description: 'Reduces background task frequency on battery: Sentinel slows from 1h to 3h intervals, tab-budget from 1min to 5min, and decoy cover traffic is disabled when battery is low (≤20%). All normal browsing is unaffected.',
-      category: 'Performance', stability: 'stable', risk: 'low',
-      risk_note: 'None. Background tasks only. Browsing performance is unchanged.',
-      enabled: true, restart_required: false, added_in: 'v0.11.0' },
-    { id: 'etag_cache', name: 'Conditional Filter List Fetch', description: 'Sends ETag/If-None-Match on blocklist updates. If the list has not changed since last download, the server sends 304 Not Modified — no data transferred. Saves ~1 MB/week on EasyList + EasyPrivacy.',
-      category: 'Performance', stability: 'stable', risk: 'low',
-      risk_note: 'None. Standard HTTP caching behaviour.',
-      enabled: true, restart_required: false, added_in: 'v0.11.0' },
-    { id: 'ipc_batch', name: 'IPC Call Batching', description: 'Coalesces high-frequency IPC calls (reading events, noise seed) within a single animation frame. Cuts IPC round-trips by ~60% during active scrolling, reducing CPU usage and improving scroll smoothness.',
-      category: 'Performance', stability: 'beta', risk: 'low',
-      risk_note: 'None. Batched calls deliver the same data with lower frequency.',
-      enabled: true, restart_required: false, added_in: 'v0.11.0' },
-  ];
+  // ── Tab limit input ────────────────────────────────────────────────────────
+  const tabLimitInput = document.getElementById('tabLimitInput');
+  if (tabLimitInput) {
+    // Load current value from Rust
+    if (window.__TAURI__) {
+      window.__TAURI__.invoke('cmd_tab_limit_get').then(n => {
+        tabLimitInput.value = n;
+      }).catch(() => {});
+    }
+    // Persist changes after a short debounce
+    let _tabLimitTimer = null;
+    tabLimitInput.addEventListener('input', () => {
+      clearTimeout(_tabLimitTimer);
+      _tabLimitTimer = setTimeout(() => {
+        const n = parseInt(tabLimitInput.value, 10);
+        if (isNaN(n) || n < 1 || n > 50) return;
+        if (window.__TAURI__) {
+          window.__TAURI__.invoke('cmd_tab_limit_set', { limit: n }).catch(() => {});
+        }
+      }, 400);
+    });
+  }
+
 </script>
 </body>
 </html>

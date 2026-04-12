@@ -1,41 +1,17 @@
-/**
- * diatom/src/features/peek.js  — v0.12.0  [F-06]
- *
- * Peek — Link Hover Preview — 悬停链接预览
- *
- * Hovering over a hyperlink for 600ms shows a compact preview card:
- *   - Page title
- *   - Domain
- *   - Open Graph description + image (if available and already cached)
- *   - Blocked badge if the domain is in the block list
- *
- * Privacy:
- *   - All fetches use current_ua() + GhostPipe if enabled.
- *   - Previously-visited URLs resolve from Museum cache (zero network).
- *   - Disabled when Zen mode is active.
- *
- * Lab ID: peek_preview
- */
 
 'use strict';
 
 import { invoke } from '../browser/ipc.js';
 import { domainOf, escHtml } from '../browser/utils.js';
 
-// ── Config ────────────────────────────────────────────────────────────────────
-
 const HOVER_DELAY_MS = 600;
 const CARD_MAX_W     = 340;
 const CARD_Z         = 2147483640;
-
-// ── State ─────────────────────────────────────────────────────────────────────
 
 let _card        = null;    // Current preview card DOM node
 let _hoverTimer  = null;    // setTimeout handle
 let _currentUrl  = null;    // URL being previewed
 let _enabled     = false;
-
-// ── Init ──────────────────────────────────────────────────────────────────────
 
 export function initPeek() {
     _enabled = true;
@@ -44,8 +20,6 @@ export function initPeek() {
     document.addEventListener('scroll',     dismissCard,  { passive: true });
     document.addEventListener('keydown',    dismissCard,  { passive: true });
 }
-
-// ── Event handlers ────────────────────────────────────────────────────────────
 
 function onMouseOver(e) {
     if (!_enabled) return;
@@ -56,7 +30,6 @@ function onMouseOver(e) {
     const href = anchor.getAttribute('href');
     if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
 
-    // Resolve relative URLs
     let url;
     try { url = new URL(href, location.href).href; } catch { return; }
     if (!url.startsWith('http')) return;
@@ -68,14 +41,11 @@ function onMouseOver(e) {
 
 function onMouseOut(e) {
     clearTimeout(_hoverTimer);
-    // Only dismiss if we're leaving both the anchor and the card
     const to = e.relatedTarget;
     if (!_card || (!_card.contains(to) && to !== _card)) {
         dismissCard();
     }
 }
-
-// ── Peek fetch ────────────────────────────────────────────────────────────────
 
 async function triggerPeek(url, anchor) {
     _currentUrl = url;
@@ -87,12 +57,9 @@ async function triggerPeek(url, anchor) {
         showCard(data, anchor);
     } catch (err) {
         if (url !== _currentUrl) return;
-        // Show minimal card on fetch failure
         showCard({ url, title: domainOf(url), description: null, og_image: null, blocked: false }, anchor);
     }
 }
-
-// ── Card rendering ────────────────────────────────────────────────────────────
 
 function showLoadingCard(url, anchor) {
     dismissCard();
@@ -152,12 +119,11 @@ function createCard(inner) {
         background:rgba(10,10,18,.96); border:1px solid rgba(96,165,250,.15);
         border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,.5);
         font:13px/1.5 'Inter',system-ui; color:#e2e8f0;
-        overflow:hidden; pointer-events:none;
+        overflow:hidden; pointer-events:auto;
         animation:peekIn .12s ease-out;
     `;
     card.innerHTML = inner;
 
-    // Keep card alive when mouse enters it
     card.addEventListener('mouseenter', () => clearTimeout(_hoverTimer));
     card.addEventListener('mouseleave', () => dismissCard());
 
@@ -169,15 +135,12 @@ function positionCard(card, anchor) {
     const vw   = window.innerWidth;
     const vh   = window.innerHeight;
 
-    // Place below the link; flip if near bottom
     let top  = rect.bottom + 8;
     let left = rect.left;
 
-    // Clamp horizontally
     if (left + CARD_MAX_W > vw - 12) {
         left = vw - CARD_MAX_W - 12;
     }
-    // Flip above if near bottom
     if (top + 160 > vh) {
         top = rect.top - 160;
     }
@@ -192,14 +155,10 @@ function dismissCard() {
     _currentUrl = null;
 }
 
-// ── Zen mode guard ────────────────────────────────────────────────────────────
-
 export function setEnabled(active) {
     _enabled = active;
     if (!active) dismissCard();
 }
-
-// ── CSS injection (minimal, inlined) ─────────────────────────────────────────
 
 const PEEK_CSS = `
 @keyframes peekIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
@@ -221,3 +180,4 @@ if (!document.getElementById('__diatom_peek_css')) {
     style.textContent = PEEK_CSS;
     document.head.appendChild(style);
 }
+

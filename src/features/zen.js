@@ -1,16 +1,3 @@
-/**
- * diatom/src/features/zen.js  — v7
- *
- * Zen Mode frontend.
- *
- * Activation: /zen address-bar command or keyboard shortcut (Ctrl+Shift+Z).
- * Deactivation: user types ≥ 50-character "intent declaration" in the interstitial.
- *
- * When active:
- *   - All Notification API calls are suppressed (handled in sw.js via BroadcastChannel)
- *   - Navigations to blocked-category domains show the Zen interstitial instead of loading
- *   - The address bar receives a faint teal left border
- */
 
 'use strict';
 
@@ -19,8 +6,6 @@ import { el, qs } from '../browser/utils.js';
 
 let _zenActive = false;
 let _aphorism  = 'Now will always have been.';
-
-// ── Init ──────────────────────────────────────────────────────────────────────
 
 export async function initZen() {
   try {
@@ -32,7 +17,6 @@ export async function initZen() {
     console.warn('[Zen] init failed:', err);
   }
 
-  // Keyboard shortcut: Ctrl+Shift+Z
   document.addEventListener('keydown', e => {
     if (e.ctrlKey && e.shiftKey && e.key === 'Z') {
       e.preventDefault();
@@ -40,11 +24,8 @@ export async function initZen() {
     }
   });
 
-  // Notify Service Worker of current state
   broadcastToSW();
 }
-
-// ── Activate / Deactivate ────────────────────────────────────────────────────
 
 export async function activate() {
   await invoke('cmd_zen_activate');
@@ -62,18 +43,10 @@ export async function deactivate() {
 
 export function isActive() { return _zenActive; }
 
-// ── Interstitial ─────────────────────────────────────────────────────────────
-
-/**
- * Show the Zen interstitial when a blocked domain is navigated to.
- * Returns a Promise that resolves when the user unlocks Zen (or refuses).
- */
 export function showInterstitial(domain, category) {
   return new Promise(resolve => {
-    // Remove any existing interstitial
     qs('#zen-interstitial')?.remove();
 
-    // P4 fix: inject Zen stylesheet once — Lumière dark tokens + reduced-motion
     if (!qs('#zen-interstitial-style')) {
       const style = document.createElement('style');
       style.id = 'zen-interstitial-style';
@@ -223,8 +196,6 @@ export function showInterstitial(domain, category) {
   });
 }
 
-// ── UI helpers ────────────────────────────────────────────────────────────────
-
 function applyZenUi(active) {
   const omni = qs('#omnibox');
   if (!omni) return;
@@ -237,3 +208,4 @@ function broadcastToSW() {
   bc.postMessage({ type: 'ZEN', active: _zenActive });
   bc.close();
 }
+

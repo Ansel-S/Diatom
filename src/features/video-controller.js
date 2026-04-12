@@ -1,39 +1,10 @@
-/**
- * diatom/src/features/video-controller.js  — v7.1
- *
- * Video Speed Controller: global 0.1×–16× playback speed for every
- * <video> and <audio> element on any page.
- *
- * Absorbed from the Video Speed Controller extension pattern.
- * Runs entirely locally — no network calls, no external scripts.
- *
- * Activation:
- *   - Speed overlay appears on mouseenter over any video element.
- *   - Keyboard shortcuts (page-context, not global):
- *       S        → slow down 0.1×
- *       D        → speed up 0.1×
- *       R        → reset to 1×
- *       Z        → rewind 10s
- *       X        → forward 10s
- *       V        → toggle overlay visibility
- *
- * The overlay is injected into the page via diatom-api.js.
- * This file is the shell-side controller; it receives
- * speed-change requests from the page via BroadcastChannel.
- */
 
 'use strict';
-
-// ── Constants ─────────────────────────────────────────────────────────────────
 
 const MIN_SPEED = 0.1;
 const MAX_SPEED = 16.0;
 const STEP      = 0.1;
 const SKIP_SECS = 10;
-
-// ── Page-side injection code ──────────────────────────────────────────────────
-// This string is eval'd into every page context via cmd_page_eval.
-// It is self-contained: no imports, no closure over outer scope.
 
 export const PAGE_INJECTION = /* js */`
 (function() {
@@ -78,7 +49,6 @@ export const PAGE_INJECTION = /* js */`
     v.__diatom_vc = true;
     activeVideo = v;
 
-    // Wrap in a positioned container so overlay is relative to video
     const wrap = v.parentElement;
     if (!wrap) return;
     const pos = getComputedStyle(wrap).position;
@@ -93,7 +63,6 @@ export const PAGE_INJECTION = /* js */`
     });
   }
 
-  // Attach to all existing and future videos
   function scanVideos() {
     document.querySelectorAll('video, audio').forEach(attachToVideo);
   }
@@ -101,7 +70,6 @@ export const PAGE_INJECTION = /* js */`
   new MutationObserver(scanVideos).observe(document.body || document.documentElement,
     { childList: true, subtree: true });
 
-  // Keyboard shortcuts (page-context only, not captured globally)
   document.addEventListener('keydown', function(e) {
     const tag = e.target?.tagName?.toLowerCase();
     if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable) return;
@@ -122,7 +90,6 @@ export const PAGE_INJECTION = /* js */`
     e.preventDefault();
   }, { capture: false });
 
-  // Speed dial: mouse wheel over video while holding Alt
   document.addEventListener('wheel', function(e) {
     if (!e.altKey || !activeVideo) return;
     const delta = e.deltaY > 0 ? -STEP : STEP;
@@ -133,32 +100,20 @@ export const PAGE_INJECTION = /* js */`
 })();
 `;
 
-// ── Shell-side: inject on every navigation ────────────────────────────────────
-
 import { invoke } from '../browser/ipc.js';
 
 let _enabled = true;
 
 export function setEnabled(v) { _enabled = v; }
 
-/**
- * Inject the video controller into the current page.
- * Called from tabs.js on navigation.
- */
 export async function injectVideoController() {
   if (!_enabled) return;
   try {
-    // Use Tauri's eval to inject the page-side code
     await invoke('cmd_page_eval', { script: PAGE_INJECTION });
   } catch {
-    // Non-critical — page may block eval in strict CSP contexts
   }
 }
 
-/**
- * Render a small speed badge in the Diatom chrome (address bar area)
- * showing the current playback speed for ambient awareness.
- */
 export function showSpeedBadge(speed) {
   let badge = document.querySelector('#vc-badge');
   if (!badge) {
@@ -178,3 +133,4 @@ export function showSpeedBadge(speed) {
   badge.textContent = speed === 1 ? '' : `${speed.toFixed(2)}×`;
   badge.style.opacity = speed === 1 ? '0' : '1';
 }
+

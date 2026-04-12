@@ -1,0 +1,7 @@
+[build]
+
+[target.'cfg(all())']
+rustflags = [
+    "-W", "clippy::await_holding_lock",
+    "-W", "clippy::await_holding_refcell_ref",
+]

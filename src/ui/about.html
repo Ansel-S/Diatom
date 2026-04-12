@@ -1,12 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>About Diatom</title>
-  <!-- P3 fix: load fonts locally — Inter, Playfair Display, DM Sans, DM Mono -->
-  <link rel="stylesheet" href="../fonts.css">
-  <!-- P1 fix: dark-mode auto-detection (about.html is always dark, but keep consistent) -->
+<head> <meta charset="UTF-8"> <meta name="viewport" content="width=device-width, initial-scale=1"> <title>About Diatom</title> <!-- P3 fix: load fonts locally — Inter, Playfair Display, DM Sans, DM Mono --> <link rel="stylesheet" href="../fonts.css"> <!-- P1 fix: dark-mode auto-detection (about.html is always dark, but keep consistent) -->
   <script>
     (function () {
       var stored = localStorage.getItem('diatom-theme');
@@ -17,283 +11,253 @@
           document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
       });
     })();
-  </script>
+</script>
   <style>
-    :root {
-      /* ── Lumière dark palette — Deep graphite · Antique gold · Pearl white · Ice crystal blue ── */
-      --bg:    #171620;
-      --bg-2:  #1F1E2C;
-      --fg:    #F2EFF8;
-      --muted: #8A8698;
-      --blue:  #6AAED0;    /* Ice crystal blue */
-      --teal:  #BCC8BC;    /* Sage green */
-      --amber: #C49248;    /* Antique gold */
-      --line:  rgba(160,150,225,0.10);
-      --glass: rgba(64,56,102,0.60);
-      --glass-border: rgba(130,120,200,0.24);
-      --glass-inset:  rgba(160,150,225,0.14);
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background: var(--bg); color: var(--fg);
-      font-family: var(--f-body, 'Inter', system-ui, sans-serif);
-      font-size: 15px; line-height: 1.7;
-      min-height: 100vh;
-    }
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin:     0;
+  padding:    0;
+}
 
-    /* Film grain overlay */
-    body::before {
-      content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
-      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
-      opacity: .15;
-    }
+:root {
+  --bg:#171620;
+  --bg-2:#1F1E2C;
+  --fg:#F2EFF8;
+  --muted:#8A8698;
+  --blue:#6AAED0;
+  --teal:#BCC8BC;
+  --amber:#C49248;
+  --line:rgba(160,150,225,0.10);
+  --glass:rgba(64,56,102,0.60);
+  --glass-border:rgba(130,120,200,0.24);
+  --glass-inset:rgba(160,150,225,0.14);
+}
 
-    .page { position: relative; z-index: 1; max-width: 680px; margin: 0 auto; padding: 5rem 2rem 6rem; }
+* {
+  box-sizing:border-box;
+  margin:0;
+  padding:0;
+}
 
-    /* Diatom glyph */
-    .glyph-wrap { display: flex; justify-content: center; margin-bottom: 3rem; }
-    .glyph-wrap canvas { border-radius: 50%; }
+body {
+  background:var(--bg);
+  color:var(--fg);
+  font-family:var(--f-body,'Inter',system-ui,sans-serif);
+  font-size:15px;
+  line-height:1.7;
+  min-height:100vh;
+}
 
-    h1 {
-      font-family: 'Playfair Display', Georgia, serif;
-      font-size: 2.4rem; font-weight: 700;
-      color: var(--fg); margin-bottom: .4rem;
-    }
-    .version { color: var(--muted); font-size: .82rem; letter-spacing: .08em; margin-bottom: 3.5rem; }
+body::before {
+  content:'';
+  position:fixed;
+  inset:0;
+  z-index:0;
+  pointer-events:none;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+  opacity:.15;
+}
 
-    section { margin-bottom: 3rem; }
-    h2 {
-      font-size: .68rem; letter-spacing: .14em; text-transform: uppercase;
-      color: var(--muted); border-bottom: 1px solid var(--line);
-      padding-bottom: .5rem; margin-bottom: 1.2rem;
-    }
-    p { color: #94a3b8; margin-bottom: .9rem; }
-    p strong { color: var(--fg); font-weight: 600; }
+.page {
+  position:relative;
+  z-index:1;
+  max-width:680px;
+  margin:0 auto;
+  padding:5rem 2rem 6rem;
+}
 
-    /* Hard limits table */
-    .limits { width: 100%; border-collapse: collapse; font-size: .85rem; }
-    .limits th {
-      text-align: left; padding: .5rem .75rem;
-      background: rgba(255,255,255,.04); color: var(--muted);
-      font-weight: 500; border-bottom: 1px solid var(--line);
-    }
-    .limits td { padding: .5rem .75rem; border-bottom: 1px solid var(--line); }
-    .limits tr:last-child td { border-bottom: none; }
-    .limits .badge {
-      display: inline-block; padding: .15rem .5rem; border-radius: 3px;
-      font-size: .72rem; font-weight: 600; letter-spacing: .04em;
-    }
-    .badge-never  { background: rgba(239,68,68,.15);  color: #f87171; }
-    .badge-always { background: rgba(96,165,250,.12); color: #60a5fa; }
+.glyph-wrap {
+  display:flex;
+  justify-content:center;
+  margin-bottom:3rem;
+}
 
-    /* Axioms */
-    .axiom { display: flex; gap: 1rem; margin-bottom: 1.2rem; align-items: flex-start; }
-    .axiom-num {
-      flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%;
-      background: rgba(96,165,250,.1); color: var(--blue);
-      display: flex; align-items: center; justify-content: center;
-      font-size: .78rem; font-weight: 700; margin-top: .15rem;
-    }
-    .axiom-body { color: #94a3b8; font-size: .9rem; }
-    .axiom-body strong { color: var(--fg); }
+.glyph-wrap canvas {
+  border-radius:50%;
+}
 
-    /* Build info */
-    .meta { font-size: .78rem; color: var(--muted); margin-top: 3rem; }
-    .meta span { display: inline-block; margin-right: 1.5rem; }
-    #build-hash { font-family: var(--f-mono, 'DM Mono', monospace); }
+h1 {
+  font-family:'Playfair Display',Georgia,serif;
+  font-size:2.4rem;
+  font-weight:700;
+  color:var(--fg);
+  margin-bottom:.4rem;
+}
 
-    /* Separator */
-    hr { border: none; border-top: 1px solid var(--line); margin: 2.5rem 0; }
+.version {
+  color:var(--muted);
+  font-size:.82rem;
+  letter-spacing:.08em;
+  margin-bottom:3.5rem;
+}
 
-    /* P2 fix: prefers-reduced-motion */
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after {
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
-      }
-    }
-  </style>
+section {
+  margin-bottom:3rem;
+}
+
+h2 {
+  font-size:.68rem;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--muted);
+  border-bottom:1px solid var(--line);
+  padding-bottom:.5rem;
+  margin-bottom:1.2rem;
+}
+
+p {
+  color:#94a3b8;
+  margin-bottom:.9rem;
+}
+
+p strong {
+  color:var(--fg);
+  font-weight:600;
+}
+
+.limits {
+  width:100%;
+  border-collapse:collapse;
+  font-size:.85rem;
+}
+
+.limits th {
+  text-align:left;
+  padding:.5rem .75rem;
+  background:rgba(255,255,255,.04);
+  color:var(--muted);
+  font-weight:500;
+  border-bottom:1px solid var(--line);
+}
+
+.limits td {
+  padding:.5rem .75rem;
+  border-bottom:1px solid var(--line);
+}
+
+.limits tr:last-child td {
+  border-bottom:none;
+}
+
+.limits .badge {
+  display:inline-block;
+  padding:.15rem .5rem;
+  border-radius:3px;
+  font-size:.72rem;
+  font-weight:600;
+  letter-spacing:.04em;
+}
+
+.badge-never {
+  background:rgba(239,68,68,.15);
+  color:#f87171;
+}
+
+.badge-always {
+  background:rgba(96,165,250,.12);
+  color:#60a5fa;
+}
+
+.axiom {
+  display:flex;
+  gap:1rem;
+  margin-bottom:1.2rem;
+  align-items:flex-start;
+}
+
+.axiom-num {
+  flex-shrink:0;
+  width:28px;
+  height:28px;
+  border-radius:50%;
+  background:rgba(96,165,250,.1);
+  color:var(--blue);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:.78rem;
+  font-weight:700;
+  margin-top:.15rem;
+}
+
+.axiom-body {
+  color:#94a3b8;
+  font-size:.9rem;
+}
+
+.axiom-body strong {
+  color:var(--fg);
+}
+
+.meta {
+  font-size:.78rem;
+  color:var(--muted);
+  margin-top:3rem;
+}
+
+.meta span {
+  display:inline-block;
+  margin-right:1.5rem;
+}
+
+#build-hash {
+  font-family:var(--f-mono,'DM Mono',monospace);
+}
+
+hr {
+  border:none;
+  border-top:1px solid var(--line);
+  margin:2.5rem 0;
+}
+
+@media (prefers-reduced-motion:reduce) {
+}
+
+</style>
 </head>
 <body>
-<div class="page">
-
-  <!-- Generative glyph (rendered by engine) -->
-  <div class="glyph-wrap">
-    <canvas id="about-glyph" width="80" height="80"></canvas>
-  </div>
-
-  <h1>Diatom</h1>
-  <div class="version" id="version-line">v7.2 · Local-first · Digital sovereignty</div>
-
-  <section>
-    <h2>Why this browser exists</h2>
-    <p>
+<div class="page"> <!-- Generative glyph (rendered by engine) --> <div class="glyph-wrap"> <canvas id="about-glyph" width="80" height="80"></canvas> </div> <h1>Diatom</h1> <div class="version" id="version-line">v7.2 · Local-first · Digital sovereignty</div> <section> <h2>Why this browser exists</h2> <p>
       Most browsers are a <strong>window</strong> that lets you see the internet.
       Diatom is a <strong>filter</strong> that keeps the internet from seeing you.
-    </p>
-    <p>
+    </p> <p>
       It is not trying to replace Chrome. It is for people who have noticed that every scroll,
       every click, and every pause is being quietly recorded by dozens of third-party systems —
       and who have decided their attention is worth more than that.
-    </p>
-    <p>
+    </p> <p>
       The diatom is a single-celled alga that builds precise geometric shells from silica.
       In nature's smallest things, the most rigorous architecture.
       The name is a reminder: <strong>restraint is a form of strength</strong>.
-    </p>
-  </section>
-
-  <hr>
-
-  <section>
-    <h2>Product axioms (non-negotiable boundaries)</h2>
-
-    <div class="axiom">
-      <div class="axiom-num">1</div>
-      <div class="axiom-body">
-        <strong>Zero data uploads, no exceptions.</strong>
+    </p> </section> <hr> <section> <h2>Product axioms (non-negotiable boundaries)</h2> <div class="axiom"> <div class="axiom-num">1</div> <div class="axiom-body"> <strong>Zero data uploads, no exceptions.</strong>
         Diatom has no server. No account system. No telemetry.
         No anonymous data collection for "improving user experience".
         Your data stays on your device. If it leaves, that is your deliberate choice.
-      </div>
-    </div>
-
-    <div class="axiom">
-      <div class="axiom-num">2</div>
-      <div class="axiom-body">
-        <strong>The Zen Mode 50-character gate is never removed.</strong>
+      </div> </div> <div class="axiom"> <div class="axiom-num">2</div> <div class="axiom-body"> <strong>The Zen Mode 50-character gate is never removed.</strong>
         Breaking focus has a cost. The cost is writing down why you are breaking it.
         This is not a punishment — it is a ritual. Rituals make behaviour conscious.
-      </div>
-    </div>
-
-    <div class="axiom">
-      <div class="axiom-num">3</div>
-      <div class="axiom-body">
-        <strong>No centralised sync server, ever.</strong>
+      </div> </div> <div class="axiom"> <div class="axiom-num">3</div> <div class="axiom-body"> <strong>No centralised sync server, ever.</strong>
         Even if that means cross-device sync requires physical proximity (Mesh P2P).
         The price of cloud convenience is that your data becomes the cloud's data.
-      </div>
-    </div>
-
-    <div class="axiom">
-      <div class="axiom-num">4</div>
-      <div class="axiom-body">
-        <strong>Ad-tracking systems do not deserve to be treated politely.</strong>
+      </div> </div> <div class="axiom"> <div class="axiom-num">4</div> <div class="axiom-body"> <strong>Ad-tracking systems do not deserve to be treated politely.</strong>
         Decoy traffic, fingerprint noise, Referer sanitisation — these are not activism,
         they are a systematic defence against a systematic violation.
-      </div>
-    </div>
-
-    <div class="axiom">
-      <div class="axiom-num">5</div>
-      <div class="axiom-body">
-        <strong>The Echo tells you the truth, even when it is uncomfortable.</strong>
+      </div> </div> <div class="axiom"> <div class="axiom-num">5</div> <div class="axiom-body"> <strong>The Echo tells you the truth, even when it is uncomfortable.</strong>
         If you spent 80% of your time consuming fragmented content today, it will say so.
         This is not judgement — it is a mirror. You are free to dislike what you see,
         but Diatom will not smash the mirror on your behalf.
-      </div>
-    </div>
-
-    <div class="axiom">
-      <div class="axiom-num">6</div>
-      <div class="axiom-body">
-        <strong>Accessibility is an ethical floor, not a feature list item.</strong>
+      </div> </div> <div class="axiom"> <div class="axiom-num">6</div> <div class="axiom-body"> <strong>Accessibility is an ethical floor, not a feature list item.</strong>
         Screen reader users should not lose access because we pursue minimalism.
         The cost of accessibility is borne by Diatom, not by the user.
-      </div>
-    </div>
-  </section>
-
-  <hr>
-
-  <section>
-    <h2>Hard limits (enforced at code level)</h2>
-    <table class="limits">
-      <thead>
-        <tr><th>Constraint</th><th>Value</th><th>Class</th></tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>Binary size ceiling</td>
-          <td>15 MB</td>
-          <td><span class="badge badge-always">Hard limit</span></td>
-        </tr>
-        <tr>
-          <td>10-tab memory target</td>
-          <td>150 MB</td>
-          <td><span class="badge badge-always">Target</span></td>
-        </tr>
-        <tr>
-          <td>Cold-start time</td>
-          <td>&lt; 80 ms</td>
-          <td><span class="badge badge-always">Target</span></td>
-        </tr>
-        <tr>
-          <td>Decoy request rate</td>
-          <td>Max 1 req/8s/domain</td>
-          <td><span class="badge badge-always">Code-enforced</span></td>
-        </tr>
-        <tr>
-          <td>Centralised sync server</td>
-          <td>Never</td>
-          <td><span class="badge badge-never">Never</span></td>
-        </tr>
-        <tr>
-          <td>Upload any user data to a Diatom server</td>
-          <td>Never</td>
-          <td><span class="badge badge-never">Never</span></td>
-        </tr>
-        <tr>
-          <td>Send a real fingerprint to ad platforms</td>
-          <td>Never</td>
-          <td><span class="badge badge-never">Never</span></td>
-        </tr>
-        <tr>
-          <td>Introduce a WebExtensions API compatibility layer</td>
-          <td>Never</td>
-          <td><span class="badge badge-never">Never</span></td>
-        </tr>
-        <tr>
-          <td>Bundle a Blink/Chromium instance</td>
-          <td>Never (exceeds size budget)</td>
-          <td><span class="badge badge-never">Never</span></td>
-        </tr>
-        <tr>
-          <td>Zen Mode skip button</td>
-          <td>Never</td>
-          <td><span class="badge badge-never">Never</span></td>
-        </tr>
-      </tbody>
-    </table>
-  </section>
-
-  <hr>
-
-  <section>
-    <h2>Honest limitations</h2>
-    <p>
+      </div> </div> </section> <hr> <section> <h2>Hard limits (enforced at code level)</h2> <table class="limits"> <thead> <tr><th>Constraint</th><th>Value</th><th>Class</th></tr> </thead> <tbody> <tr> <td>Binary size ceiling</td> <td>15 MB</td> <td><span class="badge badge-always">Hard limit</span></td> </tr> <tr> <td>10-tab memory target</td> <td>150 MB</td> <td><span class="badge badge-always">Target</span></td> </tr> <tr> <td>Cold-start time</td> <td>&lt; 80 ms</td> <td><span class="badge badge-always">Target</span></td> </tr> <tr> <td>Decoy request rate</td> <td>Max 1 req/8s/domain</td> <td><span class="badge badge-always">Code-enforced</span></td> </tr> <tr> <td>Centralised sync server</td> <td>Never</td> <td><span class="badge badge-never">Never</span></td> </tr> <tr> <td>Upload any user data to a Diatom server</td> <td>Never</td> <td><span class="badge badge-never">Never</span></td> </tr> <tr> <td>Send a real fingerprint to ad platforms</td> <td>Never</td> <td><span class="badge badge-never">Never</span></td> </tr> <tr> <td>Introduce a WebExtensions API compatibility layer</td> <td>Never</td> <td><span class="badge badge-never">Never</span></td> </tr> <tr> <td>Bundle a Blink/Chromium instance</td> <td>Never (exceeds size budget)</td> <td><span class="badge badge-never">Never</span></td> </tr> <tr> <td>Zen Mode skip button</td> <td>Never</td> <td><span class="badge badge-never">Never</span></td> </tr> </tbody> </table> </section> <hr> <section> <h2>Honest limitations</h2> <p>
       Diatom cannot play 4K DRM video (Linux). It does not support bank hardware-key plugins,
       WebUSB, or WebMIDI. On some government sites and legacy enterprise systems,
       it will prompt you to open in the system browser.
-    </p>
-    <p>
-      These are not bugs. They are boundaries. <strong>A tool with boundaries is more trustworthy than a tool that is everywhere.</strong>
-    </p>
-    <p>
+    </p> <p>
+      These are not bugs. They are boundaries. <strong>A tool with boundaries is more trustworthy than a tool that is everywhere.</strong> </p> <p>
       We will tell you where the boundaries are. We will not pretend they do not exist.
-    </p>
-  </section>
-
-  <div class="meta">
-    <span>Version: <strong id="about-version">7.2.0</strong></span>
-    <span>Build: <span id="build-hash">—</span></span>
-    <span>Arch: <span id="about-arch">—</span></span>
-    <span>Platform: <span id="about-os">—</span></span>
-  </div>
+    </p> </section> <div class="meta"> <span>Version: <strong id="about-version">7.2.0</strong></span> <span>Build: <span id="build-hash">—</span></span> <span>Arch: <span id="about-arch">—</span></span> <span>Platform: <span id="about-os">—</span></span> </div>
 </div>
-
 <script type="module">
   import { renderDiatomSvg } from '/features/diatom-engine.js';
   import { invoke } from '/browser/ipc.js';

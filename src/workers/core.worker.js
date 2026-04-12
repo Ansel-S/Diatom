@@ -1,26 +1,7 @@
-/**
- * diatom/src/workers/core.worker.js  — v0.11.0  — v7
- *
- * Core worker thread. Zero UI jank regardless of index size.
- *
- * v7 additions:
- *   ECHO_SCHEDULE   — check if it's time to compute The Echo (Sunday → Monday transition)
- *   INDEX_BUNDLE    — index a frozen museum bundle for TF-IDF search
- *   READING_FLUSH   — forward accumulated reading telemetry to Rust
- *   SW_SYNC         — push Museum index snapshot to Service Worker for Ghost Redirect
- *
- * Existing handlers unchanged: INDEX, REMOVE, SEARCH, CLUSTER, OPFS_*.
- */
 
 'use strict';
 
-// [v0.11.0 PERF] Visibility-gated processing.
-// The main thread sends { type: 'VISIBILITY', hidden: bool } on visibilitychange.
-// When hidden, non-urgent work (idle indexing) is deferred until visible again.
 let _workerPaused = false;
-
-
-// ── TF-IDF engine (unchanged from v6) ────────────────────────────────────────
 
 class TFIDFEngine {
   #docs  = new Map(); // id → { tf: Map<term,freq>, preview }
@@ -94,10 +75,6 @@ class TFIDFEngine {
     return results.sort((a, b) => b.score - a.score).slice(0, topK);
   }
 
-  /**
-   * Extract the top N tags from a document.
-   * Used when indexing a frozen bundle.
-   */
   topTags(id, n = 8) {
     this.#rebuildIdf();
     const doc = this.#docs.get(id);
@@ -135,8 +112,6 @@ const STOPWORDS = new Set([
   '的','了','在','是','我','他','她','你','们','这','那','也','就','都',
   'http','https','www','com','net','org',
 ]);
-
-// ── OPFS manager (unchanged from v6) ─────────────────────────────────────────
 
 class OPFSManager {
   #dir = null;
@@ -191,15 +166,12 @@ class OPFSManager {
   #key(k) { return k.replace(/[^\w-]/g, '_').slice(0, 80) + '.json'; }
 }
 
-// ── Reading telemetry buffer (v7) ─────────────────────────────────────────────
-
 class ReadingBuffer {
   #buf = [];
   #flushTimer = null;
 
   push(event) {
     this.#buf.push(event);
-    // Auto-flush after 10 events or 30 s inactivity
     if (this.#buf.length >= 10) {
       this.flush();
     } else {
@@ -212,7 +184,6 @@ class ReadingBuffer {
     clearTimeout(this.#flushTimer);
     const events = this.#buf.splice(0);
     if (!events.length) return;
-    // Post back to main thread for Rust IPC
     self.postMessage({ type: 'READING_EVENTS_READY', events });
   }
 
@@ -223,26 +194,18 @@ class ReadingBuffer {
   }
 }
 
-// ── Echo scheduler (v7) ───────────────────────────────────────────────────────
-
 class EchoScheduler {
   #lastIsoWeek = null;
 
-  /**
-   * Check if we've crossed a week boundary.
-   * Returns true if The Echo should be computed (first Monday check of the week).
-   */
   tick() {
     const now = new Date();
     const iso  = isoWeekStr(now);
 
     if (this.#lastIsoWeek === null) {
-      // Load from OPFS on first tick
       return false;  // caller populates #lastIsoWeek from OPFS
     }
 
     if (iso !== this.#lastIsoWeek && now.getDay() === 1) {
-      // It's Monday and we haven't computed this week yet
       this.#lastIsoWeek = iso;
       return true;
     }
@@ -267,17 +230,7 @@ function isoWeekStr(date) {
   return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
 }
 
-// ── Museum metadata cache (v7) ────────────────────────────────────────────────
-// Kept in the Worker for Ghost Redirect SW sync.
-// Format: Array<{ id, url, title, tfidf_tags: string[] }>
 let museumIndex = [];
-
-// ── Progressive idle indexing (v7.1) ─────────────────────────────────────────
-// Prevents "fan-spin hell" on first run by chunking heavy indexing work
-// into small idle-time slices, similar to how Spotlight indexes macOS.
-//
-// The indexing queue is processed 5 documents at a time,
-// only when the worker has been idle > 500ms (no incoming messages).
 
 class IdleIndexer {
   #queue  = [];   // { id, text, url, title }[]
@@ -290,7 +243,6 @@ class IdleIndexer {
 
   #scheduleSlice() {
     clearTimeout(this.#timer);
-    // Wait 500ms of inactivity before processing the next chunk
     this.#timer = setTimeout(() => this.#processSlice(), 500);
   }
 
@@ -302,16 +254,12 @@ class IdleIndexer {
       tfidf.index(item.id, `${item.title} ${item.url} ${item.text.slice(0, 2000)}`);
       museumIndex.push({ id: item.id, url: item.url, title: item.title, tfidf_tags: tfidf.topTags(item.id, 8) });
     }
-    // Push SW sync after each chunk
     self.postMessage({ type: 'SW_MUSEUM_SYNC', index: museumIndex });
-    // Report progress
     self.postMessage({ type: 'INDEX_PROGRESS', remaining: this.#queue.length, processed: batch.length });
-    // Schedule next chunk if queue is not empty
     if (this.#queue.length) this.#scheduleSlice();
   }
 
   resetIdleTimer() {
-    // Called on every incoming message to defer indexing while busy
     clearTimeout(this.#timer);
     if (this.#queue.length) this.#scheduleSlice();
   }
@@ -324,22 +272,18 @@ const opfs     = new OPFSManager();
 const readBuf  = new ReadingBuffer();
 const echoSched = new EchoScheduler();
 
-// Init OPFS and load echo schedule state
 opfs.init().then(async () => {
   const lastWeek = await opfs.read('echo:last_week');
   if (lastWeek) echoSched.setLastWeek(lastWeek);
   else echoSched.setLastWeek(echoSched.currentIsoWeek());
 
-  // Load museum index snapshot for SW Ghost Redirect
   const idx = await opfs.read('museum:index');
   if (idx) {
     museumIndex = idx;
-    // Push to SW
     self.postMessage({ type: 'SW_MUSEUM_SYNC', index: museumIndex });
   }
 });
 
-// Periodic echo tick (check every 15 min)
 setInterval(() => {
   if (echoSched.tick()) {
     self.postMessage({ type: 'ECHO_DUE', week: echoSched.currentIsoWeek() });
@@ -347,18 +291,14 @@ setInterval(() => {
   }
 }, 15 * 60 * 1000);
 
-// ── Message dispatcher ────────────────────────────────────────────────────────
-
 self.addEventListener('message', async ({ data }) => {
   const { id, type, payload } = data;
   let result = null, error = null;
 
-  // Reset idle indexer timer on every message (we're busy)
   idleIndexer.resetIdleTimer();
 
   try {
     switch (type) {
-      // ── v6 handlers (unchanged) ─────────────────────────────────────────────
 
       case 'INDEX':
         tfidf.index(payload.id, payload.text);
@@ -396,29 +336,18 @@ self.addEventListener('message', async ({ data }) => {
         await opfs.clearAll();
         break;
 
-      // ── v7 handlers ─────────────────────────────────────────────────────────
-
-      /**
-       * INDEX_BUNDLE: index a frozen E-WBN bundle's stripped text.
-       * Returns the top 8 TF-IDF tags for writing back to museum_bundles.
-       */
       case 'INDEX_BUNDLE': {
         const { bundleId, text, url, title } = payload;
         tfidf.index(bundleId, text);
         const tags = tfidf.topTags(bundleId, 8);
-        // Update museum index snapshot
         museumIndex = museumIndex.filter(e => e.id !== bundleId);
         museumIndex.push({ id: bundleId, url, title, tfidf_tags: tags });
-        // Persist index and push to SW
         await opfs.write('museum:index', museumIndex);
         self.postMessage({ type: 'SW_MUSEUM_SYNC', index: museumIndex });
         result = tags;
         break;
       }
 
-      /**
-       * MUSEUM_REMOVE: remove a bundle from the TF-IDF index and SW snapshot.
-       */
       case 'MUSEUM_REMOVE': {
         tfidf.remove(payload.bundleId);
         museumIndex = museumIndex.filter(e => e.id !== payload.bundleId);
@@ -427,11 +356,6 @@ self.addEventListener('message', async ({ data }) => {
         break;
       }
 
-      /**
-       * MUSEUM_LOAD_IDLE: bulk-load Museum entries using progressive idle-time indexing.
-       * Prevents CPU spike on first launch. Reports progress via INDEX_PROGRESS events.
-       * Use this instead of MUSEUM_LOAD for large collections (>50 items).
-       */
       case 'MUSEUM_LOAD_IDLE': {
         museumIndex = [];
         idleIndexer.enqueue(
@@ -446,9 +370,6 @@ self.addEventListener('message', async ({ data }) => {
         break;
       }
 
-      /**
-       * MUSEUM_LOAD: existing handler (immediate, for small collections ≤50 items).
-       */
       case 'MUSEUM_LOAD': {
         for (const entry of (payload.entries ?? [])) {
           const tagText = Array.isArray(entry.tfidf_tags)
@@ -462,18 +383,10 @@ self.addEventListener('message', async ({ data }) => {
         break;
       }
 
-      /**
-       * READING_EVENT: push a single reading telemetry event into the buffer.
-       * Buffer auto-flushes to main thread every 10 events or 30 s.
-       */
       case 'READING_EVENT':
         readBuf.push(payload);
         break;
 
-      /**
-       * READING_FLUSH: force-drain the reading buffer immediately.
-       * Called on tab close or navigation.
-       */
       case 'READING_FLUSH': {
         const events = readBuf.drain();
         result = events;
@@ -483,10 +396,6 @@ self.addEventListener('message', async ({ data }) => {
         break;
       }
 
-      /**
-       * ECHO_SCHEDULE_TICK: manual trigger for the echo scheduler check.
-       * Returns { due: bool, week: string }.
-       */
       case 'ECHO_SCHEDULE_TICK':
         result = {
           due:  echoSched.tick(),
@@ -494,10 +403,6 @@ self.addEventListener('message', async ({ data }) => {
         };
         break;
 
-      /**
-       * TFIDF_TAGS_FOR: compute tags for arbitrary text without indexing it.
-       * Useful for live tagging of the current page.
-       */
       case 'TFIDF_TAGS_FOR': {
         const tmpId = `__tmp_${Date.now()}`;
         tfidf.index(tmpId, payload.text);
@@ -507,8 +412,6 @@ self.addEventListener('message', async ({ data }) => {
       }
 
       case 'VISIBILITY':
-        // [v0.11.0 PERF] Pause/resume idle indexer based on page visibility.
-        // Avoids CPU wake-ups while the user is not actively using the browser.
         _workerPaused = !!payload?.hidden;
         if (!_workerPaused) idleIndexer?.resumeIfPaused?.();
         result = { paused: _workerPaused };
@@ -523,3 +426,4 @@ self.addEventListener('message', async ({ data }) => {
 
   self.postMessage({ id, result, error });
 });
+

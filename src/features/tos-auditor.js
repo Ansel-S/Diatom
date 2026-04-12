@@ -1,40 +1,21 @@
-/**
- * diatom/src/features/tos-auditor.js  — v0.11.0 (was v1.0
- *
- * ToS Red-Flag Auditor — frontend content script
- *
- * Responsibilities:
- *   1. Detect registration / ToS / privacy-policy pages
- *   2. Extract the policy text from the DOM
- *   3. Call cmd_tos_audit via IPC and receive structured flags
- *   4. Render a dismissible risk panel at the top of the page
- *   5. Expose a manual trigger (⌘⇧T) for any page
- *
- * The heavy analysis runs entirely in Rust (local, no network).
- * This script only handles detection, extraction and display.
- */
 
 'use strict';
 
 import { invoke } from '../browser/ipc.js';
-
-// ── Configuration ─────────────────────────────────────────────────────────────
+import { escHtml } from '../browser/utils.js';
 
 const PANEL_ID        = '__diatom_tos_panel';
 const TRIGGER_KEY     = 'T'; // ⌘⇧T or Ctrl⇧T
 
-// URL path fragments that strongly indicate a ToS / privacy page
 const TOS_URL_SIGNALS = [
   'terms', 'tos', 'privacy', 'policy', 'legal', 'eula',
   'user-agreement', 'conditions', 'gdpr', 'cookie', 'consent',
 ];
 
-// URL path fragments that indicate a registration page (often embeds a ToS)
 const REG_URL_SIGNALS = [
   'signup', 'sign-up', 'register', 'create-account', 'join', 'onboard',
 ];
 
-// Selectors for common ToS / privacy policy containers
 const CONTENT_SELECTORS = [
   '[data-testid*="privacy"]', '[data-testid*="terms"]',
   '.privacy-policy', '.terms-of-service', '.legal-content',
@@ -42,10 +23,7 @@ const CONTENT_SELECTORS = [
   '#terms-of-service', '#legal', 'article', 'main',
 ];
 
-// Min text length to attempt an audit (avoids auditing stub pages)
 const MIN_TEXT_LENGTH = 400;
-
-// ── Severity styles ──────────────────────────────────────────────────────────
 
 const SEV_CONFIG = {
   critical: { icon: '🚨', label: 'Critical', color: '#c44848', bg: 'rgba(196,72,72,0.08)', border: 'rgba(196,72,72,0.22)' },
@@ -53,8 +31,6 @@ const SEV_CONFIG = {
   medium:   { icon: '📋',  label: 'Medium',   color: '#c4a468', bg: 'rgba(196,164,104,0.08)', border: 'rgba(196,164,104,0.22)' },
   low:      { icon: 'ℹ️',  label: 'Low',      color: '#747490', bg: 'rgba(116,116,144,0.06)', border: 'rgba(116,116,144,0.14)' },
 };
-
-// ── Page detection ────────────────────────────────────────────────────────────
 
 function urlSignalScore() {
   const path = (location.pathname + location.search).toLowerCase();
@@ -65,7 +41,6 @@ function urlSignalScore() {
 }
 
 function linkSignalScore() {
-  // Check for "Terms", "Privacy Policy" links in page — common on reg forms
   let score = 0;
   document.querySelectorAll('a').forEach(a => {
     const t = (a.textContent || '').toLowerCase();
@@ -77,7 +52,6 @@ function linkSignalScore() {
 }
 
 function hasCheckboxWithTosLink() {
-  // Pattern: <input type="checkbox"> near a "terms" link — classic signup form
   return Array.from(document.querySelectorAll('input[type="checkbox"]')).some(cb => {
     const parent = cb.closest('label,div,p,li') || cb.parentElement;
     if (!parent) return false;
@@ -91,10 +65,7 @@ function shouldAutoAudit() {
   return score >= 3;
 }
 
-// ── Text extraction ───────────────────────────────────────────────────────────
-
 function extractPolicyText() {
-  // 1. Try known content selectors
   for (const sel of CONTENT_SELECTORS) {
     const el = document.querySelector(sel);
     if (el && el.innerText && el.innerText.length > MIN_TEXT_LENGTH) {
@@ -102,7 +73,6 @@ function extractPolicyText() {
     }
   }
 
-  // 2. Find the deepest block with the most text
   let best = null;
   let bestLen = 0;
   document.querySelectorAll('div, section, article').forEach(el => {
@@ -114,14 +84,10 @@ function extractPolicyText() {
   });
   if (best) return best.innerText.trim().slice(0, 60_000);
 
-  // 3. Fall back to body text
   return (document.body?.innerText || '').trim().slice(0, 60_000);
 }
 
-// ── UI rendering ──────────────────────────────────────────────────────────────
-
 function riskMeterSVG(score) {
-  // Score 0–100 → gauge arc fill
   const r     = 28;
   const cx    = 40;
   const cy    = 40;
@@ -177,9 +143,6 @@ function formatCategory(cat) {
   return map[cat] || '📌 ' + cat;
 }
 
-function escHtml(str) {
-  return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
 
 function buildPanel(result) {
   const { flags, risk_score, summary, url, text_length } = result;
@@ -356,8 +319,6 @@ function buildPanel(result) {
   return panel;
 }
 
-// ── Full summary overlay ──────────────────────────────────────────────────────
-
 function buildFullSummary(result) {
   const { flags, risk_score, summary, url } = result;
   const overlay = document.createElement('div');
@@ -419,8 +380,6 @@ function buildFullSummary(result) {
   return overlay;
 }
 
-// ── Panel lifecycle ───────────────────────────────────────────────────────────
-
 let _panelActive = false;
 let _lastResult  = null;
 
@@ -445,18 +404,14 @@ function showPanel(result) {
     document.body.appendChild(buildFullSummary(result));
   });
 
-  // Auto-dismiss on navigation
   const nav = new MutationObserver(() => {
     if (document.getElementById(PANEL_ID) === panel) {
-      // still attached; leave it
     } else {
       nav.disconnect();
     }
   });
   nav.observe(document.documentElement, { childList: true, subtree: false });
 }
-
-// ── Core audit flow ───────────────────────────────────────────────────────────
 
 let _auditInProgress = false;
 
@@ -481,7 +436,6 @@ function runAudit(forceShow = false) {
       return;
     }
 
-    // Brief loading indicator
     let loadingEl = null;
     if (forceShow) {
       loadingEl = document.createElement('div');
@@ -505,7 +459,6 @@ function runAudit(forceShow = false) {
 
     if (loadingEl) loadingEl.remove();
 
-    // Auto-suppress: if no flags and not forced, don't show anything
     if (!forceShow && result.flags.length === 0) return;
 
     showPanel(result);
@@ -517,8 +470,6 @@ function runAudit(forceShow = false) {
   }
 }
 
-// ── Auto-trigger on navigation ────────────────────────────────────────────────
-
 let _currentUrl  = location.href;
 let _navTimer    = null;   // [BUG-5 FIX] single settle-timer slot
 
@@ -526,9 +477,6 @@ function onNavigate(url) {
   _currentUrl  = url;
   _panelActive = false;
 
-  // [BUG-5 FIX] Cancel any in-flight settle timer from a previous navigation.
-  // Without this, rapid SPA route changes stack multiple 1500ms timers, causing
-  // multiple runAudit() calls after the final navigation completes.
   clearTimeout(_navTimer);
 
   _navTimer = setTimeout(() => {
@@ -539,8 +487,6 @@ function onNavigate(url) {
     runAudit(false);
   }, 1500);
 }
-
-// ── Keyboard shortcut ─────────────────────────────────────────────────────────
 
 document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === TRIGGER_KEY) {
@@ -554,16 +500,11 @@ document.addEventListener('keydown', e => {
   }
 }, { capture: false });
 
-// ── Expose public API ─────────────────────────────────────────────────────────
-
 export const tosAuditor = {
-  /** Trigger a manual audit of the current page */
   audit: () => runAudit(true),
-  /** Called by tabs.js on every navigation */
   onNavigate,
-  /** Returns the last audit result, or null */
   lastResult: () => _lastResult,
 };
 
-// Expose for the browser shell (called from tabs.js)
 window.__diatom_tos_auditor = tosAuditor;
+

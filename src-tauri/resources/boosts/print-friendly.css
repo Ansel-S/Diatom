@@ -1,8 +1,1 @@
-/* Diatom Boost: Print Friendly — optimized for printing */
-@media print {
-    nav, aside, footer, header, .ad, .sidebar,
-    [class*="nav"], [class*="menu"], [class*="cookie"],
-    script, style { display: none !important; }
-    body { font: 12pt Georgia, serif; color: #000; background: #fff; }
-    a::after { content: " (" attr(href) ")"; font-size: 10pt; color: #555; }
-}
+@media print{nav,aside,footer,header,.ad,.sidebar,[class*="nav"],[class*="menu"],[class*="cookie"],script,style{display:none !important}body{font:12pt Georgia,serif;color:#000;background:#fff}a::after{content:" (" attr(href) ")";font-size:10pt;color:#555}}

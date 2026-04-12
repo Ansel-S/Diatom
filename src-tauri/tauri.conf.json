@@ -1,13 +1,13 @@
 {
   "productName": "Diatom",
-  "version": "0.12.0",
+  "version": "0.14.3",
   "identifier": "com.ansel-s.diatom",
   "build": {
     "frontendDist": {
       "path": "../src"
     },
     "beforeDevCommand": "",
-    "beforeBuildCommand": ""
+    "beforeBuildCommand": "cd ../zed-core && cargo build --release -p diatom_devtools"
   },
   "app": {
     "windows": [],
@@ -33,8 +33,12 @@
     ],
     "copyright": "Copyright \u00a9 2026 Ansel-S. Licensed under BUSL-1.1.",
     "category": "Utility",
-    "shortDescription": "A minimalist, privacy-first, local-AI browser.",
-    "longDescription": "Diatom is a browser built on the principle of digital sovereignty. No accounts, no cloud, no telemetry. All computation stays on your device.",
+    "shortDescription": "A minimalist, privacy-first, local-AI browser + developer tools.",
+    "longDescription": "Diatom is a browser built on the principle of digital sovereignty. No accounts, no cloud, no telemetry. Integrated developer tools powered by Zed's editor core. All computation stays on your device.",
+    "resources": [
+      "../zed-core/target/release/diatom-devpanel",
+      "resources/"
+    ],
     "macOS": {
       "minimumSystemVersion": "12.0",
       "signingIdentity": null,
@@ -42,6 +46,9 @@
       "frameworks": []
     },
     "windows": {
+      "resources": [
+        "../zed-core/target/release/diatom-devpanel.exe"
+      ],
       "wix": {
         "language": "en-US"
       },
@@ -56,7 +63,8 @@
         "depends": [
           "libwebkit2gtk-4.1-0",
           "libssl3",
-          "libayatana-appindicator3-1"
+          "libayatana-appindicator3-1",
+          "libgpu-dev"
         ]
       }
     }
@@ -65,9 +73,9 @@
     "shell": {
       "open": true
     },
-    "updater": {
-      "pubkey": "",
-      "endpoints": []
-    }
+    "notification": {}
+  },
+  "process": {
+    "maxRss": 57671680
   }
 }

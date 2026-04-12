@@ -1,15 +1,3 @@
-/**
- * diatom/src/browser/tabs.js  — v7
- *
- * Tab UI + lifecycle management.
- *
- * v7 additions:
- *   • Reading event recording on tab blur / navigation
- *   • Freeze (E-WBN) integration: Cmd/Ctrl+S → cmd_freeze_page
- *   • DOM Crusher rules loaded for each domain on navigation
- *   • Zen mode navigation intercept
- *   • Threat check on navigation
- */
 
 'use strict';
 
@@ -19,12 +7,9 @@ import { applyCrusherRules } from '../features/dom-crusher.js';
 import { showInterstitial as zenInterstitial, isActive as zenIsActive } from '../features/zen.js';
 import { startHealthMonitor } from './compat.js';
 
-// ── State ─────────────────────────────────────────────────────────────────────
-
 let _tabs      = [];           // Array<Tab> from Rust
 let _activeId  = null;
 
-// Reading telemetry for the active tab
 let _dwellStart   = Date.now();
 let _scrollVelocity = 0;       // running average px/s
 let _lastScrollY  = 0;
@@ -32,75 +17,60 @@ let _lastScrollTs = Date.now();
 let _tabSwitches  = 0;
 let _readingMode  = false;
 
-// Worker reference (set from main.js)
 let _worker = null;
-
-// ── Init ──────────────────────────────────────────────────────────────────────
 
 export async function initTabs(worker) {
   _worker = worker;
 
-  // Load initial state from Rust
   const state = await invoke('cmd_tabs_state');
   _tabs     = state.tabs;
   _activeId = state.active_id;
   render();
 
-  // Listen for Rust-side events
-  await listen('diatom:tab_created',  t   => { _tabs.push(t); render(); });
-  await listen('diatom:tab_closed',   id  => { _tabs = _tabs.filter(t => t.id !== id); render(); });
-  await listen('diatom:tabs_updated', st  => { _tabs = st.tabs; _activeId = st.active_id; render(); });
+  await listen('diatom:tab_created', t => {
+    _tabs.push(t);
+    render();
+  });
+  await listen('diatom:tab_closed', id => {
+    _tabs = _tabs.filter(t => t.id !== id);
+    render();
+  });
+  await listen('diatom:tabs_updated', st => {
+    _tabs       = st.tabs;
+    _activeId   = st.active_id;
+    render();
+  });
 
-  // Keyboard: Cmd/Ctrl+T (new tab), Cmd/Ctrl+W (close), Cmd/Ctrl+S (freeze)
   document.addEventListener('keydown', onGlobalKey);
 
-  // Track scroll velocity for reading telemetry
   document.addEventListener('scroll', onScroll, { passive: true });
 
-  // Visibility: record dwell when page goes background
   document.addEventListener('visibilitychange', onVisibilityChange);
 
-  // Load Museum index into worker for Ghost Redirect
   loadMuseumIndex();
 }
 
-// ── Navigation ────────────────────────────────────────────────────────────────
-
-/**
- * Navigate the active tab to a URL.
- * Runs the full v7 pre-process pipeline:
- *   1. Rust cmd_preprocess_url (block check, param strip, HTTPS upgrade, Zen check)
- *   2. Threat check (async, non-blocking for known-clean domains)
- *   3. Load in WebView
- */
 export async function navigate(rawUrl) {
   const url = resolveUrl(rawUrl);
 
-  // 1. Rust pre-process
   const nav = await invoke('cmd_preprocess_url', { url });
 
   if (nav.blocked) {
-    // Tracker domain — show brief ambient indicator, don't navigate
     flashBlockIndicator(nav.clean_url);
     return;
   }
 
   if (nav.zen_blocked) {
-    // Zen interstitial — wait for user decision
     const decision = await zenInterstitial(domainOf(nav.clean_url), nav.zen_category);
     if (decision !== 'unlocked') return;
   }
 
-  // 2. Record dwell for previous page before navigating away
   flushReadingEvent();
 
-  // 3. Load
   loadUrl(nav.clean_url);
 
-  // 4. Load DOM Crusher rules for new domain (non-blocking)
   loadCrusherRulesForDomain(domainOf(nav.clean_url));
 
-  // 5. Async threat check (shows warning tint if threat found — doesn't block)
   checkThreatAsync(domainOf(nav.clean_url));
 }
 
@@ -110,16 +80,12 @@ export function navSignal() { return _navAbort.signal; }
 function loadUrl(url) {
   _navAbort.abort();
   _navAbort = new AbortController();
-  // In Tauri, we navigate the WebView via Rust eval or a dedicated command.
-  // In the shell WebView (chrome), we use location.href.
   emit('diatom:navigate', { url });
 
-  // Trigger health monitor, ToS auditor, and close Shadow Index on every navigation
   try { startHealthMonitor(url); } catch {}
   try { window.__diatom_tos_auditor?.onNavigate(url); } catch {}
   try { window.__diatom_shadow_index?.close?.(); } catch {}
 
-  // Reset dwell tracking
   _dwellStart    = Date.now();
   _scrollVelocity = 0;
   _lastScrollY   = window.scrollY;
@@ -128,34 +94,20 @@ function loadUrl(url) {
   _readingMode   = false;
 }
 
-// ── Tab CRUD ──────────────────────────────────────────────────────────────────
-
 export async function createTab(url = 'about:blank') {
-  // [B-02 FIX] Do NOT push the returned tab into _tabs here.
-  // The diatom:tab_created listener below is the sole authoritative update path.
-  // The old code pushed to _tabs both here AND in the listener, causing a
-  // duplicate tab pill until the next diatom:tabs_updated sync.
   const tab = await invoke('cmd_tab_create', { url });
-  // Optimistically set the active ID so the UI can show a loading indicator
-  // without waiting for the Rust event round-trip.
   _activeId = tab.id;
   render();
   if (url !== 'about:blank') navigate(url);
 }
 
 export async function closeTab(tabId) {
-  // Record dwell before closing
   if (tabId === _activeId) flushReadingEvent();
   await invoke('cmd_tab_close', { tab_id: tabId });
   _tabs = _tabs.filter(t => t.id !== tabId);
   if (_activeId === tabId) {
-    // [B-10 FIX] After filtering, verify the fallback target still exists.
-    // If _tabs is now empty, auto-create a new blank tab so there is always
-    // at least one tab (Chrome/Firefox behaviour).
     const fallback = _tabs[_tabs.length - 1];
     if (!fallback) {
-      // _tabs is empty — create a new tab to avoid a blank tab bar with no
-      // active tab that requires a manual gesture to recover from.
       await createTab();
       return;
     }
@@ -172,39 +124,27 @@ export async function activateTab(tabId) {
   _activeId = tabId;
   await invoke('cmd_tab_activate', { tab_id: tabId });
   _dwellStart   = Date.now();
-  // [BUG-4 FIX] Reset scroll state when switching tabs.
-  // Without this, the first onScroll event on the new tab computes a spurious
-  // velocity from the delta between the old tab's scrollY and the new tab's
-  // scrollY (which could be 0), producing an artificially huge velocity reading
-  // that corrupts the Echo quality assessment.
   _scrollVelocity = 0;
   _lastScrollY    = window.scrollY;
   _lastScrollTs   = Date.now();
   render();
 }
 
-// ── Freeze (E-WBN) ───────────────────────────────────────────────────────────
-
 export async function freezeCurrentPage() {
   const tab = _tabs.find(t => t.id === _activeId);
   if (!tab) return;
 
-  // Film-grain convergence animation (100ms)
   triggerFreezeAnimation();
 
-  // Capture current page HTML via injected API
   let rawHtml;
   try {
     rawHtml = await invoke('cmd_fetch', { url: tab.url }).then(r => r.body);
   } catch {
-    // Fallback: use document.documentElement.outerHTML via eval
     rawHtml = document.documentElement?.outerHTML ?? '<html></html>';
   }
 
-  // Compute TF-IDF tags in worker
   const tags = await workerRpc('TFIDF_TAGS_FOR', { text: rawHtml, n: 8 });
 
-  // Send to Rust for stripping + encryption + storage
   try {
     const bundle = await invoke('cmd_freeze_page', {
       raw_html:   rawHtml,
@@ -213,7 +153,6 @@ export async function freezeCurrentPage() {
       tfidf_tags: tags ?? [],
     });
 
-    // Index in worker for Ghost Redirect + Museum search
     if (_worker && bundle) {
       _worker.postMessage({
         id: uid(), type: 'INDEX_BUNDLE',
@@ -221,7 +160,6 @@ export async function freezeCurrentPage() {
       });
     }
 
-    // Play freeze sound (mechanical shutter)
     playFreezeSound();
 
     showFreezeConfirmation(tab.title);
@@ -238,13 +176,11 @@ function triggerFreezeAnimation() {
 }
 
 function playFreezeSound() {
-  // Minimal mechanical click via Web Audio API (< 50ms burst)
   try {
     const ctx   = new AudioContext();
     const buf   = ctx.createBuffer(1, ctx.sampleRate * 0.04, ctx.sampleRate);
     const data  = buf.getChannelData(0);
     for (let i = 0; i < data.length; i++) {
-      // Exponentially decaying white noise burst
       data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.008));
     }
     const src = ctx.createBufferSource();
@@ -255,7 +191,6 @@ function playFreezeSound() {
     gain.connect(ctx.destination);
     src.start();
     src.onended = () => ctx.close();
-  } catch { /* audio not critical */ }
 }
 
 function showFreezeConfirmation(title) {
@@ -269,7 +204,6 @@ function showFreezeConfirmation(title) {
   `;
   msg.textContent = `🧊 Frozen · ${title.slice(0, 64)}`;
   document.body.appendChild(msg);
-  // Fade out after 2s
   setTimeout(() => {
     msg.style.transition = 'opacity .4s';
     msg.style.opacity = '0';
@@ -277,14 +211,11 @@ function showFreezeConfirmation(title) {
   }, 2000);
 }
 
-// ── Reading telemetry ─────────────────────────────────────────────────────────
-
 function onScroll() {
   const now   = Date.now();
   const dy    = Math.abs(window.scrollY - _lastScrollY);
   const dt    = (now - _lastScrollTs) / 1000;
   if (dt > 0) {
-    // Exponential moving average
     _scrollVelocity = _scrollVelocity * 0.7 + (dy / dt) * 0.3;
   }
   _lastScrollY  = window.scrollY;
@@ -300,10 +231,6 @@ function onVisibilityChange() {
   }
 }
 
-/**
- * Record and flush the current reading event to the worker buffer.
- * Worker auto-forwards to Rust every 10 events or 30 s.
- */
 function flushReadingEvent() {
   const tab = _tabs.find(t => t.id === _activeId);
   if (!tab || tab.url === 'about:blank') return;
@@ -319,12 +246,10 @@ function flushReadingEvent() {
     tab_switches: _tabSwitches,
   };
 
-  // Post to worker buffer
   if (_worker) {
     _worker.postMessage({ id: uid(), type: 'READING_EVENT', payload: event });
   }
 
-  // Reset
   _dwellStart   = Date.now();
   _tabSwitches  = 0;
 }
@@ -333,15 +258,11 @@ export function setReadingMode(active) {
   _readingMode = active;
 }
 
-// ── DOM Crusher ───────────────────────────────────────────────────────────────
-
 async function loadCrusherRulesForDomain(domain) {
   try {
     const rules = await invoke('cmd_dom_blocks_for', { domain });
     if (rules?.length) {
-      // Apply immediately to the current document
       applyCrusherRules(rules);
-      // Also push to SW for future navigations to this domain
       const bc = new BroadcastChannel('diatom:sw');
       bc.postMessage({
         type:      'CRUSHER_RULES',
@@ -350,10 +271,7 @@ async function loadCrusherRulesForDomain(domain) {
       });
       bc.close();
     }
-  } catch { /* non-critical */ }
 }
-
-// ── Threat check ─────────────────────────────────────────────────────────────
 
 async function checkThreatAsync(domain) {
   try {
@@ -363,7 +281,6 @@ async function checkThreatAsync(domain) {
     } else if (result.level === 'Suspicious') {
       showThreatHint(result.reason);
     }
-  } catch { /* non-critical */ }
 }
 
 function showThreatBanner(reason) {
@@ -385,7 +302,6 @@ function showThreatBanner(reason) {
 }
 
 function showThreatHint(reason) {
-  // Subtle tint on address bar
   const omni = qs('#omnibox');
   if (omni) {
     omni.style.borderColor = '#d97706';
@@ -415,8 +331,6 @@ function flashBlockIndicator(url) {
   }, 1200);
 }
 
-// ── Museum index ──────────────────────────────────────────────────────────────
-
 async function loadMuseumIndex() {
   if (!_worker) return;
   try {
@@ -427,10 +341,7 @@ async function loadMuseumIndex() {
         payload: { entries: bundles },
       });
     }
-  } catch { /* non-critical */ }
 }
-
-// ── Worker RPC helper ─────────────────────────────────────────────────────────
 
 function workerRpc(type, payload) {
   if (!_worker) return Promise.resolve(null);
@@ -446,8 +357,6 @@ function workerRpc(type, payload) {
     _worker.postMessage({ id, type, payload });
   });
 }
-
-// ── Keyboard shortcuts ────────────────────────────────────────────────────────
 
 function onGlobalKey(e) {
   const mod = e.metaKey || e.ctrlKey;
@@ -468,8 +377,6 @@ function onGlobalKey(e) {
       break;
   }
 }
-
-// ── Render ────────────────────────────────────────────────────────────────────
 
 function render() {
   const bar = qs('#tab-bar');
@@ -494,7 +401,6 @@ function render() {
     bar.appendChild(btn);
   }
 
-  // Close buttons
   bar.querySelectorAll('.tab-close').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -506,3 +412,4 @@ function render() {
 function sleepIcon(sleep) {
   return { Awake: '', Shallow: '·', Deep: '💤', Evicted: '·' }[sleep] ?? '';
 }
+

@@ -1,24 +1,5 @@
-/**
- * diatom/src/features/diatom-engine.js  — v7
- *
- * Generative Diatom Engine.
- * Renders a unique, symmetric geometric glyph derived from the user's
- * weekly behaviour metrics.
- *
- * Primary path:  WebGPU compute → render into <canvas>
- * Fallback path: procedural SVG (pure JS, no canvas needed)
- *
- * Mapping rules (from spec):
- *   focus_score   → symmetry axes (3–12)
- *   density_score → branch complexity (fine detail)
- *   breadth_score → radial spread (arm length)
- *
- * NO external chart libraries are used.
- */
 
 'use strict';
-
-// ── WebGPU path ────────────────────────────────────────────────────────────────
 
 const WGSL_SHADER = `
 struct Uniforms {
@@ -36,14 +17,12 @@ const PI = 3.14159265;
 const TAU = 6.28318530;
 
 fn sdf_arm(r: f32, theta: f32, complexity: f32, spread: f32) -> f32 {
-  // Petal SDF with sub-branches
   let base     = r - spread * 0.45 * (1.0 + 0.3 * cos(theta * (3.0 + complexity * 7.0)));
   let fringe   = 0.04 * complexity * cos(theta * (8.0 + complexity * 20.0));
   return base + fringe;
 }
 
 fn palette(t: f32, sat: f32) -> vec3f {
-  // A → B → C (scholar blue, builder purple, leisure amber)
   let a = vec3f(0.37, 0.65, 0.98);  // scholar blue
   let b = vec3f(0.66, 0.55, 0.98);  // builder purple
   let c = vec3f(0.98, 0.57, 0.24);  // leisure amber
@@ -61,36 +40,28 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let r     = length(uv);
   let angle = atan2(uv.y, uv.x);
 
-  // N-fold symmetry
   let n       = f32(u.symmetry_axes);
   let sector  = floor((angle + PI) / (TAU / n));
   let folded  = (angle + PI) - sector * (TAU / n);
-  // Mirror within sector
   let mirrored = abs(folded - PI / n);
 
-  // Compute SDF for the arm
   let d = sdf_arm(r, mirrored, u.branch_complexity, u.radial_spread);
 
-  // Inside the arm: bright glyph colour; outside: dark background
   let inside  = 1.0 - smoothstep(-0.02, 0.02, d);
   let ring    = 1.0 - smoothstep(0.0, 0.015, abs(d));  // silhouette edge glow
 
-  // Colour by angle (maps to scholar/builder/leisure palette)
   let t       = (angle + PI) / TAU;
   let col     = palette(t, u.saturation);
 
   let pixel   = col * inside + col * ring * 0.4;
   let alpha   = inside + ring * 0.4;
 
-  // Add breathing pulse
   let pulse   = 0.5 + 0.5 * sin(u.time * 0.8);
   let final_alpha = clamp(alpha * (0.85 + 0.15 * pulse), 0.0, 1.0);
 
   textureStore(out_tex, vec2i(i32(gid.x), i32(gid.y)), vec4f(pixel, final_alpha));
 }
 `;
-
-// ── WebGPU renderer ────────────────────────────────────────────────────────────
 
 async function renderDiatomWebGPU(canvas, params) {
   if (!navigator.gpu) throw new Error('WebGPU not available');
@@ -107,7 +78,6 @@ async function renderDiatomWebGPU(canvas, params) {
   const axes  = Math.round(3 + params.focus * 9);  // 3–12
   const sat   = 0.3 + params.focus * 0.7;
 
-  // Uniform buffer: 5 x f32/u32 = 20 bytes → pad to 32
   const uniformData = new ArrayBuffer(32);
   const u32View     = new Uint32Array(uniformData);
   const f32View     = new Float32Array(uniformData);
@@ -123,7 +93,6 @@ async function renderDiatomWebGPU(canvas, params) {
   });
   device.queue.writeBuffer(uniformBuf, 0, uniformData);
 
-  // Storage texture
   const texture = device.createTexture({
     size: [SIZE, SIZE],
     format: 'rgba8unorm',
@@ -151,7 +120,6 @@ async function renderDiatomWebGPU(canvas, params) {
   pass.dispatchWorkgroups(Math.ceil(SIZE / 8), Math.ceil(SIZE / 8));
   pass.end();
 
-  // Copy texture → canvas
   const renderPipeline = device.createRenderPipeline({
     layout: 'auto',
     vertex: {
@@ -203,9 +171,6 @@ async function renderDiatomWebGPU(canvas, params) {
   device.queue.submit([encoder.finish()]);
 }
 
-// ── SVG fallback renderer ──────────────────────────────────────────────────────
-// Pure 2D canvas, zero external deps. Same visual concept, no GPU required.
-
 export function renderDiatomSvg(canvas, params) {
   const ctx  = canvas.getContext('2d');
   const SIZE = canvas.width;
@@ -217,19 +182,15 @@ export function renderDiatomSvg(canvas, params) {
 
   ctx.clearRect(0, 0, SIZE, SIZE);
 
-  // Background
   ctx.fillStyle = 'rgba(10,10,16,1)';
   ctx.fillRect(0, 0, SIZE, SIZE);
 
-  // Draw N-fold symmetric arms
   for (let i = 0; i < axes; i++) {
     const angle = (i / axes) * Math.PI * 2;
     drawArm(ctx, cx, cy, angle, r, sub, params, axes);
-    // Mirror
     drawArm(ctx, cx, cy, angle + Math.PI / axes, r * 0.7, Math.max(1, sub - 1), params, axes);
   }
 
-  // Silhouette outline ring
   const sat  = 0.3 + params.focus * 0.7;
   ctx.beginPath();
   ctx.arc(cx, cy, r * 0.96, 0, Math.PI * 2);
@@ -237,7 +198,6 @@ export function renderDiatomSvg(canvas, params) {
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  // Centre glow
   const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 0.3);
   grd.addColorStop(0, `hsla(250,70%,80%,${0.15 + params.focus * 0.1})`);
   grd.addColorStop(1, 'transparent');
@@ -279,15 +239,6 @@ function drawArm(ctx, cx, cy, angle, r, sub, params, axes) {
   ctx.stroke();
 }
 
-// ── Main export ───────────────────────────────────────────────────────────────
-
-/**
- * Render the Generative Diatom into a canvas element.
- * Tries WebGPU first; falls back to SVG-style 2D canvas.
- *
- * @param {HTMLCanvasElement} canvas
- * @param {{ focus: number, breadth: number, density: number }} params  — all 0.0–1.0
- */
 export async function renderDiatom(canvas, params) {
   try {
     await renderDiatomWebGPU(canvas, params);
@@ -295,3 +246,4 @@ export async function renderDiatom(canvas, params) {
     renderDiatomSvg(canvas, params);
   }
 }
+

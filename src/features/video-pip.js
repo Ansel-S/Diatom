@@ -1,42 +1,21 @@
-/**
- * diatom/src/features/video-pip.js  — v0.12.0  [F-02]
- *
- * Picture-in-Picture Video Engine — 浮窗播放
- *
- * Promotes video-controller.js to a first-class PiP engine.
- * Adds requestPictureInPicture() API binding, a floating overlay window for
- * sites that block native PiP, and a media session toolbar.
- *
- * Privacy: video stream never leaves the device; no third-party PiP services.
- * Labs risk: fallback window opens a secondary Tauri WebviewWindow — ensure it
- * inherits initialization_scripts so privacy spoofing remains active.
- *
- * Lab ID: video_pip
- */
 
 'use strict';
 
 import { invoke, listen } from '../browser/ipc.js';
 
-// ── State ─────────────────────────────────────────────────────────────────────
-
 let _pipWindow   = null;   // Browser PiP window (document PiP API)
 let _activeVideo = null;   // Currently PiP'd <video> element
 let _toolbar     = null;   // Floating toolbar overlay
 let _enabled     = false;
-
-// ── Init ──────────────────────────────────────────────────────────────────────
+let _mirrorRafId = null;
 
 export function initPip() {
     _enabled = true;
 
-    // Inject PiP trigger button into every <video> on mouseover
     document.addEventListener('mouseover', onVideoHover, { passive: true });
 
-    // Listen for Rust-side PiP events (from keyboard shortcut or toolbar button)
     listen('diatom:pip-toggle', handlePipToggle);
 
-    // MediaSession API — exposes transport controls to OS media HUD
     if ('mediaSession' in navigator) {
         navigator.mediaSession.setActionHandler('play',  () => _activeVideo?.play());
         navigator.mediaSession.setActionHandler('pause', () => _activeVideo?.pause());
@@ -44,20 +23,12 @@ export function initPip() {
     }
 }
 
-// ── PiP entry ─────────────────────────────────────────────────────────────────
-
-/**
- * Enter PiP for the given video element.
- * Primary path: requestPictureInPicture() browser API.
- * Fallback: Tauri secondary window with canvas.captureStream() mirror.
- */
 export async function enterPip(videoEl) {
     if (!videoEl || videoEl === _activeVideo) return;
 
     exitPip(); // Close any existing PiP first
     _activeVideo = videoEl;
 
-    // Primary: native browser PiP
     if (document.pictureInPictureEnabled && !videoEl.disablePictureInPicture) {
         try {
             _pipWindow = await videoEl.requestPictureInPicture();
@@ -66,55 +37,50 @@ export async function enterPip(videoEl) {
             showPipIndicator('PiP Active');
             return;
         } catch (err) {
-            // NotAllowedError or SecurityError — fall through to Tauri fallback
             console.debug('[video-pip] native PiP failed:', err.message, '— using Tauri fallback');
         }
     }
 
-    // Fallback: Tauri secondary window
     await launchTauriPipWindow(videoEl);
 }
 
 export function exitPip() {
     if (_pipWindow) {
-        try { document.exitPictureInPicture?.(); } catch { /* ignore */ }
         _pipWindow = null;
+    }
+    if (_mirrorRafId !== null) {
+        cancelAnimationFrame(_mirrorRafId);
+        _mirrorRafId = null;
     }
     removeToolbar();
     _activeVideo = null;
     invoke('cmd_setting_set', { key: '__pip_active__', value: '0' }).catch(() => {});
 }
 
-// ── Tauri fallback PiP window ─────────────────────────────────────────────────
-
 async function launchTauriPipWindow(videoEl) {
-    // Capture the video stream via canvas
     const canvas  = document.createElement('canvas');
     canvas.width  = videoEl.videoWidth  || 480;
     canvas.height = videoEl.videoHeight || 270;
     const ctx     = canvas.getContext('2d');
 
-    // Mirror loop at video framerate
-    let _mirrorId;
     function mirrorFrame() {
         ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-        _mirrorId = requestAnimationFrame(mirrorFrame);
+        _mirrorRafId = requestAnimationFrame(mirrorFrame);
     }
     mirrorFrame();
 
-    // Notify Rust to open the secondary window (always-on-top, borderless, 480×270)
-    // Rust will emit diatom:pip-window-ready when the window is shown
     try {
         await invoke('cmd_setting_set', { key: '__pip_active__', value: '1' });
         showPipIndicator('PiP (Fallback)');
     } catch (err) {
         console.warn('[video-pip] Tauri fallback PiP failed:', err);
-        cancelAnimationFrame(_mirrorId);
+        if (_mirrorRafId !== null) {
+            cancelAnimationFrame(_mirrorRafId);
+            _mirrorRafId = null;
+        }
         _activeVideo = null;
     }
 }
-
-// ── Toolbar ───────────────────────────────────────────────────────────────────
 
 function buildToolbar(videoEl) {
     const bar = document.createElement('div');
@@ -149,8 +115,6 @@ function removeToolbar() {
     if (_toolbar) { _toolbar.remove(); _toolbar = null; }
 }
 
-// ── Video hover injection ─────────────────────────────────────────────────────
-
 function onVideoHover(e) {
     if (!_enabled) return;
     const video = e.target.closest('video');
@@ -170,18 +134,14 @@ function onVideoHover(e) {
     `;
     btn.addEventListener('click', e => { e.stopPropagation(); enterPip(video); });
 
-    // Position relative to video parent
     const parent = video.parentElement;
     if (parent && getComputedStyle(parent).position === 'static') {
         parent.style.position = 'relative';
     }
     video.insertAdjacentElement('afterend', btn);
 
-    // Remove button when mouse leaves the video area
     video.addEventListener('mouseleave', () => { btn.remove(); delete video.dataset.pipBtn; }, { once: true });
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function onLeavePip() {
     _pipWindow   = null;
@@ -193,7 +153,6 @@ async function handlePipToggle() {
     if (_activeVideo) {
         exitPip();
     } else {
-        // Find the first playing video on the page
         const video = Array.from(document.querySelectorAll('video'))
             .find(v => !v.paused && !v.ended && v.readyState > 2);
         if (video) await enterPip(video);
@@ -225,3 +184,4 @@ function showPipIndicator(text) {
         setTimeout(() => el.remove(), 420);
     }, 2000);
 }
+

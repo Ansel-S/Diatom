@@ -1,38 +1,21 @@
-/**
- * diatom/src/features/vision-overlay.js  — v7.1
- *
- * Vision Overlay: local OCR + optional inline translation.
- *
- * FIXES in v7.1:
- *   - Retina/HiDPI pixel offset: selection rect is now mapped correctly
- *     to the video frame using getBoundingClientRect + devicePixelRatio.
- *   - Hotkey yield: Alt+drag is cancelled when focus is on a FULL_YIELD domain
- *     (e.g. Figma) via the diatom:cancel-vision event from hotkey.js.
- *   - Tesseract worker is kept alive across calls (not re-created each time).
- */
 
 'use strict';
 
 import { invoke } from '../browser/ipc.js';
 import { el, qs } from '../browser/utils.js';
 
-// ── State ──────────────────────────────────────────────────────────────────────
-
-let _tesseract  = null;   // Tesseract.js worker (lazy init)
+let _tesseract  = null;   // Tesseract.js worker (lazy init, reused)
 let _selecting  = false;  // Alt+drag in progress
 let _startX     = 0;
 let _startY     = 0;
 let _selBox     = null;   // selection rectangle element
 let _overlay    = null;   // result panel element
 
-// ── Init ──────────────────────────────────────────────────────────────────────
-
 export function initVisionOverlay() {
   document.addEventListener('keydown',   onKeyDown);
   document.addEventListener('mousedown', onMouseDown, { capture: true });
   document.addEventListener('mousemove', onMouseMove, { capture: true });
   document.addEventListener('mouseup',   onMouseUp,   { capture: true });
-  // Hotkey manager signals us to cancel when a FULL_YIELD app is focused
   document.addEventListener('diatom:cancel-vision', () => {
     _selecting = false;
     cancelSelection();
@@ -40,10 +23,7 @@ export function initVisionOverlay() {
   });
 }
 
-// ── Input handling ─────────────────────────────────────────────────────────────
-
 function onKeyDown(e) {
-  // Escape: dismiss overlay
   if (e.key === 'Escape') {
     dismissOverlay();
     cancelSelection();
@@ -57,66 +37,48 @@ function onMouseDown(e) {
   _selecting = true;
   _startX    = e.clientX;
   _startY    = e.clientY;
-  dismissOverlay();
 
   _selBox = el('div', 'vision-sel-box');
   _selBox.style.cssText = `
-    position:fixed; z-index:2147483646; pointer-events:none;
-    border:1.5px solid rgba(96,165,250,.8);
-    background:rgba(96,165,250,.08);
-    box-shadow:0 0 0 1px rgba(96,165,250,.15);
+    position:fixed; border:1.5px dashed rgba(96,165,250,.8);
+    background:rgba(96,165,250,.06); pointer-events:none; z-index:99998;
+    left:${_startX}px; top:${_startY}px; width:0; height:0;
   `;
-  updateSelBox(e.clientX, e.clientY);
-  document.documentElement.appendChild(_selBox);
+  document.body.appendChild(_selBox);
 }
 
 function onMouseMove(e) {
   if (!_selecting || !_selBox) return;
-  e.preventDefault();
-  updateSelBox(e.clientX, e.clientY);
+  const x = Math.min(e.clientX, _startX);
+  const y = Math.min(e.clientY, _startY);
+  const w = Math.abs(e.clientX - _startX);
+  const h = Math.abs(e.clientY - _startY);
+  _selBox.style.left   = x + 'px';
+  _selBox.style.top    = y + 'px';
+  _selBox.style.width  = w + 'px';
+  _selBox.style.height = h + 'px';
 }
 
-async function onMouseUp(e) {
+function onMouseUp(e) {
   if (!_selecting) return;
-  e.preventDefault();
-  e.stopPropagation();
   _selecting = false;
+  if (_selBox) {
+    _selBox.remove();
+    _selBox = null;
+  }
 
-  const rect = getSelRect(e.clientX, e.clientY);
-  cancelSelection();
+  const x = Math.min(e.clientX, _startX);
+  const y = Math.min(e.clientY, _startY);
+  const w = Math.abs(e.clientX - _startX);
+  const h = Math.abs(e.clientY - _startY);
 
-  if (rect.width < 10 || rect.height < 10) return;
-  await runOCR(rect);
+  if (w < 8 || h < 8) return;  // too small to be intentional
+
+  const rect = { left: x, top: y, width: w, height: h };
+  runOCR(rect);
 }
-
-function updateSelBox(x, y) {
-  if (!_selBox) return;
-  const r = getSelRect(x, y);
-  Object.assign(_selBox.style, {
-    left:   `${r.left}px`,
-    top:    `${r.top}px`,
-    width:  `${r.width}px`,
-    height: `${r.height}px`,
-  });
-}
-
-function getSelRect(x2, y2) {
-  const left   = Math.min(_startX, x2);
-  const top    = Math.min(_startY, y2);
-  const width  = Math.abs(x2 - _startX);
-  const height = Math.abs(y2 - _startY);
-  return { left, top, width, height };
-}
-
-function cancelSelection() {
-  _selBox?.remove();
-  _selBox = null;
-}
-
-// ── OCR pipeline ──────────────────────────────────────────────────────────────
 
 async function runOCR(rect) {
-  // Show spinner where result will appear
   showSpinner(rect);
 
   let imageData;
@@ -128,7 +90,6 @@ async function runOCR(rect) {
     return;
   }
 
-  // Lazy-load Tesseract
   if (!_tesseract) {
     try {
       _tesseract = await loadTesseract();
@@ -149,58 +110,55 @@ async function runOCR(rect) {
     return;
   }
 
-  if (!text) {
-    showError('No text detected.');
-    return;
-  }
+  if (!text) { showError('No text detected.'); return; }
 
-  // Show OCR result
   showResult(rect, text);
-
-  // Attempt translation via Resonance Mode (non-blocking)
   tryTranslate(text);
 }
 
-// ── Screen capture ────────────────────────────────────────────────────────────
-
 async function captureRegion(rect) {
-  // Use getDisplayMedia with preferCurrentTab for minimal permission surface
   let stream;
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({
       preferCurrentTab: true,
       video: { displaySurface: 'browser' },
     });
-  } catch {
+
+    const track     = stream.getVideoTracks()[0];
+    const settings  = track?.getSettings?.() ?? {};
+    if (settings.displaySurface && settings.displaySurface !== 'browser') {
+      stream.getTracks().forEach(t => t.stop());
+      throw new Error(
+        `[Vision] Captured surface is "${settings.displaySurface}", ` +
+        `not "browser". Aborting to enforce browser-only OCR boundary.`
+      );
+    }
+  } catch (err) {
+    if (err.message?.startsWith('[Vision]')) throw err;
     return captureViaCanvas(rect);
   }
 
-  const video  = document.createElement('video');
+  const video = document.createElement('video');
   video.srcObject = stream;
   await new Promise(r => { video.onloadedmetadata = r; });
   await video.play();
 
-  // FIX: The video frame is in physical pixels; rect is in CSS pixels.
-  // We must account for devicePixelRatio to avoid the Retina offset bug.
   const dpr    = window.devicePixelRatio || 1;
   const canvas = document.createElement('canvas');
   canvas.width  = Math.round(rect.width  * dpr);
   canvas.height = Math.round(rect.height * dpr);
 
   const ctx    = canvas.getContext('2d');
-  // Map CSS rect → physical video frame coordinates
   const scaleX = video.videoWidth  / window.innerWidth;
   const scaleY = video.videoHeight / window.innerHeight;
 
   ctx.drawImage(
     video,
-    Math.round(rect.left * scaleX),  // sx: precise rounding, not float truncation
-    Math.round(rect.top  * scaleY),
+    Math.round(rect.left  * scaleX),
+    Math.round(rect.top   * scaleY),
     Math.round(rect.width  * scaleX),
     Math.round(rect.height * scaleY),
-    0, 0,
-    canvas.width,
-    canvas.height,
+    0, 0, canvas.width, canvas.height,
   );
 
   stream.getTracks().forEach(t => t.stop());
@@ -208,27 +166,17 @@ async function captureRegion(rect) {
 }
 
 function captureViaCanvas(rect) {
-  // Lightweight fallback: capture just the selected DOM region.
-  // Works for text-heavy pages; may miss canvas/video content.
   const canvas = document.createElement('canvas');
   canvas.width  = rect.width  * devicePixelRatio;
   canvas.height = rect.height * devicePixelRatio;
   const ctx = canvas.getContext('2d');
   ctx.scale(devicePixelRatio, devicePixelRatio);
-  ctx.translate(-rect.left, -rect.top);
-
-  // Walk visible elements in the region and draw their text
-  // This is a simplified path — full html2canvas not included intentionally
   ctx.fillStyle = '#fff';
-  ctx.fillRect(rect.left, rect.top, rect.width, rect.height);
+  ctx.fillRect(0, 0, rect.width, rect.height);
   ctx.fillStyle = '#000';
   ctx.font = '14px system-ui';
 
-  const walker = document.createTreeWalker(
-    document.body,
-    NodeFilter.SHOW_TEXT,
-    null,
-  );
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
   let node;
   while ((node = walker.nextNode())) {
     const range = document.createRange();
@@ -236,205 +184,132 @@ function captureViaCanvas(rect) {
     const r = range.getBoundingClientRect();
     if (r.left < rect.left + rect.width && r.right > rect.left &&
         r.top  < rect.top  + rect.height && r.bottom > rect.top) {
-      ctx.fillText(node.textContent.trim(), r.left, r.bottom);
+      ctx.fillText(node.textContent.trim(), r.left - rect.left, r.bottom - rect.top);
     }
   }
-
   return canvas;
 }
 
-// ── Tesseract loader ──────────────────────────────────────────────────────────
-
 async function loadTesseract() {
-  // Try to load from OPFS cache first, then fall back to bundled path
   const { createWorker } = await import('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.esm.min.js');
-
-  const worker = await createWorker(['chi_sim', 'eng'], 1, {
+  return createWorker(['chi_sim', 'eng'], 1, {
     workerPath:  '/assets/tesseract/worker.min.js',
     corePath:    '/assets/tesseract/tesseract-core.wasm.js',
     langPath:    '/assets/tesseract/lang-data',
-    cacheMethod: 'write',   // uses OPFS-style cache in the worker
-    logger:      m => {
-      if (m.status === 'recognizing text') {
-        updateSpinnerProgress(m.progress);
-      }
+    cacheMethod: 'write',
+    logger: m => {
+      if (m.status === 'recognizing text') updateSpinnerProgress(m.progress);
     },
   });
-
-  return worker;
 }
 
-// ── Translation via Resonance Mode ────────────────────────────────────────────
-
 async function tryTranslate(text) {
-  // Detect language: if majority ASCII, try translating to Chinese;
-  // if majority CJK, translate to English.
   const cjkRatio = (text.match(/[\u4e00-\u9fa5]/g) ?? []).length / text.length;
   const targetLang = cjkRatio > 0.3 ? 'English' : 'Chinese';
-
   try {
-    // Use cmd_fetch to call local inference bridge
-    const prompt = `Translate the following text to ${targetLang}. Output ONLY the translation, nothing else:\n\n${text.slice(0, 800)}`;
-
-    // We invoke via Rust fetch so it routes through the Inference Multiplexer
+    const prompt = `Translate the following text to ${targetLang}. Output ONLY the translation:\n\n${text.slice(0, 800)}`;
     const result = await invoke('cmd_fetch', {
-      url: 'http://localhost:11434/api/generate',
-      method: 'POST',
+      url: 'http://localhost:11434/api/generate', method: 'POST',
     });
-
-    // If local model is unavailable this will fail silently
     if (result?.body) {
-      const json = JSON.parse(result.body);
+      const json        = JSON.parse(result.body);
       const translation = json?.response?.trim();
       if (translation) appendTranslation(translation);
     }
-  } catch {
-    // Translation is best-effort — never show an error for this
-  }
 }
 
-// ── Result UI ─────────────────────────────────────────────────────────────────
+function cancelSelection() {
+  _selBox?.remove(); _selBox = null;
+}
+
+function dismissOverlay() {
+  _overlay?.remove(); _overlay = null;
+}
 
 function showSpinner(rect) {
   dismissOverlay();
   _overlay = el('div', 'vision-overlay');
-  positionOverlay(rect);
-  _overlay.innerHTML = `
-    <div style="display:flex;align-items:center;gap:.5rem;color:#94a3b8;font-size:.8rem;">
-      <span class="vision-spin" style="
-        width:12px;height:12px;border:2px solid #334155;
-        border-top-color:#60a5fa;border-radius:50%;
-        animation:vision-spin .6s linear infinite;
-      "></span>
-      <span id="vision-progress">Recognising…</span>
-    </div>
+  _overlay.style.cssText = `
+    position:fixed; z-index:99999;
+    left:${rect.left}px; top:${rect.top + rect.height + 8}px;
+    background:rgba(15,23,42,.92); border:1px solid rgba(96,165,250,.22);
+    border-radius:.5rem; padding:.6rem .9rem; color:#94a3b8; font-size:.75rem;
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
   `;
-  ensureVisionStyle();
+  _overlay.innerHTML = `<span id="vision-progress">Recognising…</span>`;
   document.body.appendChild(_overlay);
 }
 
-function updateSpinnerProgress(p) {
-  const prog = qs('#vision-progress');
-  if (prog) prog.textContent = `Recognising ${Math.round(p * 100)}%`;
+function updateSpinnerProgress(progress) {
+  const el = qs('#vision-progress');
+  if (el) el.textContent = `Recognising… ${Math.round(progress * 100)}%`;
 }
 
 function showResult(rect, text) {
   dismissOverlay();
   _overlay = el('div', 'vision-overlay');
-  positionOverlay(rect);
-
-  const copyBtn = el('button', 'vision-copy');
-  copyBtn.style.cssText = `
-    position:absolute;top:.5rem;right:.5rem;
-    background:none;border:1px solid rgba(255,255,255,.1);
-    border-radius:.25rem;color:#64748b;font-size:.7rem;
-    padding:.15rem .4rem;cursor:pointer;
+  _overlay.style.cssText = `
+    position:fixed; z-index:99999;
+    left:${Math.min(rect.left, window.innerWidth - 340)}px;
+    top:${rect.top + rect.height + 8}px;
+    max-width:320px; min-width:160px;
+    background:rgba(15,23,42,.96); border:1px solid rgba(96,165,250,.22);
+    border-radius:.5rem; padding:.8rem 1rem;
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
   `;
-  copyBtn.textContent = 'Copy';
+
+  const copyBtn  = el('button', 'vision-copy');
+  copyBtn.textContent  = 'Copy';
+  copyBtn.style.cssText = 'cursor:pointer;background:rgba(96,165,250,.14);border:1px solid rgba(96,165,250,.3);color:#60a5fa;border-radius:.3rem;padding:.2rem .6rem;font-size:.72rem;margin-right:.4rem;';
   copyBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(text).catch(() => {});
-    copyBtn.textContent = '✓';
-    setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1200);
+    navigator.clipboard.writeText(text).then(() => { copyBtn.textContent = 'Copied ✓'; });
   });
 
   const closeBtn = el('button', 'vision-close');
-  closeBtn.style.cssText = `
-    position:absolute;top:.5rem;right:3.5rem;
-    background:none;border:none;color:#475569;
-    font-size:.85rem;cursor:pointer;padding:.1rem .3rem;
-  `;
-  closeBtn.textContent = '✕';
+  closeBtn.textContent  = '✕';
+  closeBtn.style.cssText = 'cursor:pointer;background:none;border:none;color:#475569;font-size:.9rem;padding:0;';
   closeBtn.addEventListener('click', dismissOverlay);
 
+  const header = el('div', 'vision-header');
+  header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem;';
+  header.appendChild(copyBtn);
+  header.appendChild(closeBtn);
+
   const textEl = el('p', 'vision-text');
-  textEl.id = 'vision-ocr-text';
-  textEl.style.cssText = `
-    margin:0;font-size:.83rem;line-height:1.65;color:#e2e8f0;
-    white-space:pre-wrap;word-break:break-word;max-height:180px;
-    overflow-y:auto;padding-right:.25rem;
-  `;
+  textEl.style.cssText = 'color:#e2e8f0;font-size:.8rem;line-height:1.5;margin:0;word-break:break-word;white-space:pre-wrap;';
   textEl.textContent = text;
 
-  _overlay.appendChild(closeBtn);
-  _overlay.appendChild(copyBtn);
+  _overlay.appendChild(header);
   _overlay.appendChild(textEl);
-
-  ensureVisionStyle();
   document.body.appendChild(_overlay);
 }
 
 function appendTranslation(translation) {
   if (!_overlay) return;
-  const divider = el('div');
-  divider.style.cssText = 'border-top:1px solid rgba(255,255,255,.06);margin:.6rem 0 .5rem;';
-
-  const label = el('p');
-  label.style.cssText = 'margin:0 0 .3rem;font-size:.68rem;color:#475569;letter-spacing:.06em;text-transform:uppercase;';
+  const div = el('div', 'vision-translation');
+  div.style.cssText = 'border-top:1px solid rgba(255,255,255,.07);margin-top:.6rem;padding-top:.6rem;';
+  const label = el('span', 'vision-translation-label');
+  label.style.cssText = 'color:#475569;font-size:.68rem;display:block;margin-bottom:.2rem;';
   label.textContent = 'Translation';
-
-  const transEl = el('p');
-  transEl.style.cssText = `
-    margin:0;font-size:.83rem;line-height:1.65;
-    color:#94a3b8;white-space:pre-wrap;word-break:break-word;
-  `;
-  transEl.textContent = translation;
-
-  _overlay.appendChild(divider);
-  _overlay.appendChild(label);
-  _overlay.appendChild(transEl);
+  const text = el('p', 'vision-translation-text');
+  text.style.cssText = 'color:#94a3b8;font-size:.78rem;line-height:1.5;margin:0;white-space:pre-wrap;';
+  text.textContent = translation;
+  div.appendChild(label);
+  div.appendChild(text);
+  _overlay.appendChild(div);
 }
 
 function showError(msg) {
   dismissOverlay();
-  _overlay = el('div', 'vision-overlay');
-  _overlay.style.cssText += 'color:#f87171;';
-  _overlay.style.top  = '50%';
-  _overlay.style.left = '50%';
-  _overlay.style.transform = 'translate(-50%,-50%)';
+  _overlay = el('div', 'vision-error');
+  _overlay.style.cssText = `
+    position:fixed; z-index:99999; bottom:1rem; right:1rem;
+    background:rgba(196,72,72,.18); border:1px solid rgba(196,72,72,.3);
+    color:#f87171; border-radius:.4rem; padding:.5rem .8rem;
+    font-size:.75rem; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  `;
   _overlay.textContent = msg;
-  ensureVisionStyle();
   document.body.appendChild(_overlay);
   setTimeout(dismissOverlay, 3000);
 }
 
-function positionOverlay(rect) {
-  // Place below selection, or above if too close to bottom
-  const margin  = 8;
-  const below   = rect.top + rect.height + margin;
-  const wouldOOB = below + 220 > window.innerHeight;
-  const top     = wouldOOB ? Math.max(margin, rect.top - 220 - margin) : below;
-  const left    = Math.max(margin, Math.min(rect.left, window.innerWidth - 340 - margin));
-
-  _overlay.style.cssText = `
-    position:fixed; z-index:2147483647;
-    top:${top}px; left:${left}px;
-    width:320px; max-width:calc(100vw - ${margin * 2}px);
-    background:rgba(15,23,42,.92);
-    backdrop-filter:blur(12px) saturate(1.4);
-    -webkit-backdrop-filter:blur(12px) saturate(1.4);
-    border:1px solid rgba(255,255,255,.08);
-    border-radius:.6rem; padding:.75rem;
-    font-family:'Inter',system-ui,sans-serif;
-    box-shadow:0 8px 32px rgba(0,0,0,.5);
-  `;
-}
-
-function dismissOverlay() {
-  _overlay?.remove();
-  _overlay = null;
-}
-
-function ensureVisionStyle() {
-  if (qs('#vision-style')) return;
-  const style = document.createElement('style');
-  style.id = 'vision-style';
-  style.textContent = `
-    @keyframes vision-spin {
-      to { transform: rotate(360deg); }
-    }
-    .vision-text::-webkit-scrollbar { width:3px; }
-    .vision-text::-webkit-scrollbar-track { background:transparent; }
-    .vision-text::-webkit-scrollbar-thumb { background:rgba(255,255,255,.15); border-radius:2px; }
-  `;
-  document.head.appendChild(style);
-}

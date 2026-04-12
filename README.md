@@ -5,8 +5,8 @@
 [![License: BUSL-1.1](https://img.shields.io/badge/License-BUSL--1.1-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.78+-orange.svg)](https://rustup.rs)
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-purple.svg)](https://tauri.app)
-[![Binary](https://img.shields.io/badge/binary-%E2%89%A415MB-green.svg)](#)
-[![Status](https://img.shields.io/badge/status-v0.11.0-yellow.svg)](CHANGELOG.md)
+[![Binary](https://img.shields.io/badge/binary-%E2%89%A410MB-green.svg)](#)
+[![Status](https://img.shields.io/badge/status-v0.14.3-yellow.svg)](AXIOMS.md)
 
 Most browsers are a window that lets you see the internet. Diatom is a filter that keeps the internet from seeing you.
 
@@ -29,8 +29,8 @@ Diatom runs entirely on your device. No accounts. No cloud sync. No analytics. N
 | Zero data upload, no exceptions | `AppState` has no outbound API endpoints |
 | Zen Mode 50-character unlock ritual — never removable | `zen.js` character check has no bypass path |
 | No centralised sync server, ever | Architecture constraint: Mesh uses mDNS/BLE only |
-| Binary size ≤ 15 MB | CI gate: build fails if exceeded |
-| No Blink/Chromium bundled | Size budget enforcement: Blink ≈ 200 MB, budget = 15 MB |
+| Binary size ≤ 10 MB | CI gate: build fails if exceeded |
+| No Blink/Chromium bundled | Size budget enforcement: Blink ≈ 200 MB, budget = 10 MB |
 | No WebExtensions compatibility layer | Absorptive architecture: features enter the kernel, not the extension store |
 | WebUSB / WebMIDI permanently disabled | `sw.js` + `diatom-api.js`: physical boundary |
 
@@ -41,7 +41,7 @@ Diatom runs entirely on your device. No accounts. No cloud sync. No analytics. N
 | Feature | Description |
 |---|---|
 | **Native ad blocking** | Aho-Corasick automaton — tracker requests are dropped before they reach the renderer |
-| **Fingerprint noise** | Canvas / WebGL / Audio micro-perturbation; seed rotates per workspace. Bluetooth audio gets adaptive low-amplitude noise to avoid audio jitter |
+| **Fingerprint normalisation** | Canvas / WebGL / Audio / navigator APIs normalised to the statistical mode of common desktop hardware. Deterministic per-domain, invisible to sites. |
 | **E-WBN encrypted archive** | AES-256-GCM + tracker stripping + TF-IDF indexing + FTS5 full-text search. Freeze any page to your personal Museum |
 | **Native RSS** | Zero plugins. RSS 2.0 / Atom parser with TF-IDF auto-tagging and reading mode |
 | **Built-in 2FA** | TOTP/HOTP engine that auto-detects 2FA forms and fills in the code |
@@ -55,6 +55,7 @@ Diatom runs entirely on your device. No accounts. No cloud sync. No analytics. N
 | **Accessibility** | Full ARIA injection + keyboard navigation for every chrome element |
 | **Adaptive tab budget** | Three interlocking models: resource-aware scaling, golden ratio zones (Focus 61.8% / Buffer 38.2%), and screen gravity (3 tabs on phone → 13 on ultrawide) |
 | **diatom://labs** | 22 experimental features — AI, privacy, performance, sync, interface — each with an honest stability and risk rating |
+| **DevPanel** | Developer tools with "Open in Zed" — one click opens the current page's source file in the external Zed IDE. Resonance AI shares context with Zed via `~/.diatom/resonance.sock` |
 
 ---
 
@@ -131,7 +132,7 @@ cargo tauri dev
 
 ```bash
 cargo tauri build
-# Output: ≤ 15 MB binary
+# Output: ≤ 10 MB binary
 # macOS:   Diatom.app + .dmg
 # Windows: Diatom.exe + .msi
 # Linux:   diatom.deb + .AppImage
@@ -183,25 +184,15 @@ Diatom/
 ├── src-tauri/
 │   ├── src/
 │   │   ├── main.rs           Tauri entry + module registration
-│   │   ├── db.rs             SQLite (single connection, WAL, migrations)
-│   │   ├── state.rs          AppState — one managed struct for everything
-│   │   ├── commands.rs       All IPC commands (thin wrappers only)
-│   │   ├── blocker.rs        Aho-Corasick ad-blocking automaton
-│   │   ├── tabs.rs           Tab lifecycle + LZ4 ZRAM sleep
-│   │   ├── echo.rs           Persona spectrum + information nutrition
-│   │   ├── freeze.rs         E-WBN: AES-GCM + tracker strip + gzip
-│   │   ├── slm.rs            Local AI microkernel (:11435)
-│   │   ├── labs.rs           Experimental feature registry
-│   │   ├── tab_budget.rs     Adaptive tab limit engine
-│   │   ├── war_report.rs     Anti-tracking narrative report
-│   │   ├── dom_crusher.rs    CSS selector validation
-│   │   ├── zen.rs            Zen Mode state machine + domain classifier
-│   │   ├── threat.rs         Quad9 DoH + local threat list
-│   │   ├── decoy.rs          Privacy noise injection (robots.txt compliant)
-│   │   ├── compliance.rs     Informed-consent gates for sensitive features
-│   │   ├── compat.rs         Broken-page detection + system browser handoff
-│   │   ├── a11y.rs           ARIA injection + keyboard navigation
-│   │   └── storage_guard.rs  Archive budget + LRU eviction
+│   │   ├── engine/           Blocker, bandwidth, ETag cache, monitor, GhostPipe, compat, plugins
+│   │   ├── privacy/          PrivacyConfig, fingerprint_norm, PIR, OHTTP, onion, threat, wifi
+│   │   ├── storage/          SQLite DB, vault, E-WBN freeze, storage guard, Museum versioning
+│   │   ├── ai/               SLM microkernel, download renamer, shadow index, MCP host
+│   │   ├── browser/          Tab lifecycle, tab limit, per-tab proxy, DOM crusher, boosts, a11y
+│   │   ├── auth/             TOTP/2FA, platform passkeys, domain trust levels
+│   │   ├── sync/             Nostr relay, Noise_XX P2P transport, knowledge marketplace
+│   │   └── features/         Zen, RSS, panic button, breach monitor, search, pricing radar,
+│   │                         ToS auditor, local file bridge, Sentinel, War Report, Labs, compliance
 │   ├── resources/
 │   │   └── diatom-api.js     Injected into every page
 │   └── Cargo.toml
@@ -219,16 +210,44 @@ Diatom/
 │       ├── about.html        diatom://about
 │       └── labs.html         diatom://labs
 │
-├── PHILOSOPHY.md             Product constitution — 12 permanent prohibitions
-├── CHANGELOG.md              Development history v0.1.0 → present
+├── zed-integration/          DevPanel + Resonance context bridge + Zed IDE link
+│   ├── src-tauri/            Tauri commands for DevPanel, fingerprint_norm, url_stripper
+│   └── zed-core/             diatom_bridge, diatom_devtools crates
+│
+├── AXIOMS.md                 Project axioms — inviolable constraints
+├── README.md                 This file — guide + philosophy
 └── LICENSE                   BUSL-1.1, Change Date 2028, Change License MIT
 ```
 
 ---
 
+## Philosophy
+
+> *"A tool with boundaries is more trustworthy than a tool that is everywhere."*
+
+These principles shape every decision. They are documented here as rationale; as binding constraints they live in `AXIOMS.md`.
+
+**On centralisation:** Once a server stores your history, it acquires a god's-eye view. That view can be subpoenaed, sold, or leaked. The only safe central server is one that never exists.
+
+**On convenience trade-offs:** URL prefetch, search suggestions, predictive scrolling — these trade privacy for milliseconds. Diatom defaults to the most conservative posture. Users may opt in; they never opt out of something they never agreed to.
+
+**On fingerprint defence:** Random noise is detectable as noise. Normalisation to the statistical mode of common hardware is invisible — millions of real devices return the same values. Determinism is the stronger defence.
+
+**On URL stripping:** AI-generated stripping rules introduce two failure modes: removing a session token that logs the user out, or failing to recognise a novel tracker. Curated, human-reviewed Regex lists eliminate both failure modes. The rules are auditable; an AI's reasoning is not.
+
+**On local AI:** Cloud AI means your thoughts live on someone else's server. Diatom's AI is local-only, not as a feature limitation but as a privacy guarantee with no asterisk.
+
+**On DRM:** Widevine's absence is a deliberate boundary, not a technical problem to route around. Diatom's moral credibility depends on not cracking the CDM.
+
+**On funding:** Firefox's greatest tragedy was Google's money. Once that dependency forms, you lose the right to call their ad network a data-pollution honeypot. Diatom's business model, if one exists, must be fully aligned with user interests.
+
+**On attention:** "Earn tokens by watching ads" is still extracting you from the attention economy by re-selling your attention differently. Diatom's goal is extraction, not re-packaging.
+
+---
+
 ## Contributing
 
-Read [PHILOSOPHY.md](PHILOSOPHY.md) before opening a PR. Every change must pass the 12 prohibitions — the CI will catch most violations automatically.
+Read [AXIOMS.md](AXIOMS.md) before opening a PR. Every change must pass the axioms — the CI will catch most violations automatically.
 
 Bug reports and feature requests: [github.com/Ansel-S/Diatom/issues](https://github.com/Ansel-S/Diatom/issues)
 

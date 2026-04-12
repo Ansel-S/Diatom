@@ -1,0 +1,44 @@
+:root {
+  --bg:        #0d0e11;
+  --bg2:       #151720;
+  --bg3:       #1d1f2a;
+  --border:    #2a2d3a;
+  --accent:    #00d4ff;
+  --accent2:   #7c5cfc;
+  --danger:    #ff4b6e;
+  --warn:      #f59e0b;
+  --ok:        #22c55e;
+  --text:      #e2e8f0;
+  --text2:     #94a3b8;
+  --text3:     #475569;
+  --radius:    8px;
+  --radius-lg: 14px;
+  --shadow:    0 4px 24px rgba(0, 0, 0, .45);
+  --font:      "Inter", system-ui, sans-serif;
+  --mono:      "JetBrains Mono", "Fira Code", monospace;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin:     0;
+  padding:    0;
+}
+
+body {
+  font-family: var(--font);
+  background:  var(--bg);
+  color:       var(--text);
+  min-height:  100vh;
+}
+
+::-webkit-scrollbar       { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+
+.hidden { display: none !important; }
+
+.spin { animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }

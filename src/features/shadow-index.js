@@ -1,24 +1,8 @@
-/**
- * diatom/src/features/shadow-index.js  — v1.1.0
- *
- * Shadow Index — Human-Curated Search Panel
- *
- * Responsibilities:
- *   1. Keyboard shortcut (⌘⇧F / Ctrl⇧F) opens the search overlay
- *   2. Full-text TF-IDF search over the user's Museum via cmd_shadow_search
- *   3. Renders results with title, snippet, domain, date, quality badge
- *   4. Bias Contrast View: surfaces opposing perspectives for news pages
- *   5. "Freeze this page" shortcut to add the current page to Museum
- *
- * All search runs locally in Rust. No network requests unless P2P mode
- * is explicitly enabled in Labs.
- */
 
 'use strict';
 
 import { invoke } from '../browser/ipc.js';
-
-// ── Constants ─────────────────────────────────────────────────────────────────
+import { escHtml, domainOf } from '../browser/utils.js';
 
 const PANEL_ID    = '__diatom_shadow_panel';
 const OVERLAY_ID  = '__diatom_shadow_overlay';
@@ -27,14 +11,6 @@ const FREEZE_KEY  = 's';         // ⌘⇧S to freeze current page
 const MAX_RESULTS = 20;
 const DEBOUNCE_MS = 280;
 
-// Domain → estimated political lean for Bias Contrast View
-// Political lean map — last reviewed 2025-Q1.
-// NOTE: This is a HEURISTIC classifier, not an editorial judgment.
-//   • Classifications cover publication-level editorial stance, NOT individual articles.
-//   • Media stances drift over time; this list is versioned and reviewed quarterly.
-//   • Any domain not listed → 'unknown' (the safe default).
-//   • User-configurable overrides planned for v0.11.0.
-// [BUG-2 FIX] Removed duplicate 'atlantic.com' entry (theatlantic.com is canonical).
 const LEAN_DOMAINS_VERSION = '2025-Q1';
 const LEAN_DOMAINS = {
   left:        ['theguardian.com','huffpost.com','vox.com','msnbc.com','salon.com','thenation.com','democracynow.org'],
@@ -69,11 +45,6 @@ const QUALITY_CONFIG = {
   standard:      { icon: '○', label: 'Standard',       color: '#747490' },
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function escHtml(s) {
-  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
 
 function formatDate(ts) {
   if (!ts) return '';
@@ -83,8 +54,6 @@ function formatDate(ts) {
   } catch { return ''; }
 }
 
-function domainOf(url) {
-  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
 }
 
 function highlight(text, query) {
@@ -112,8 +81,6 @@ function getSnippet(text, query, maxLen = 200) {
   return text.slice(0, maxLen) + (text.length > maxLen ? '…' : '');
 }
 
-// ── State ─────────────────────────────────────────────────────────────────────
-
 let _open      = false;
 let _query     = '';
 let _results   = [];
@@ -123,11 +90,7 @@ let _searching = false;
 let _biasMode  = false;
 let _currentPageLean = 'unknown';
 
-// ── Styles ────────────────────────────────────────────────────────────────────
-
 const STYLES = null; // [v0.6.0 OPT-01] Extracted to /shadow-index.css — loaded on first open
-
-// ── DOM ───────────────────────────────────────────────────────────────────────
 
 let _overlayEl = null;
 let _panelEl   = null;
@@ -135,7 +98,6 @@ let _inputEl   = null;
 let _resultsEl = null;
 
 function createDOM() {
-  // Inject styles once
   if (!document.getElementById('__diatom_si_styles')) {
     const style = document.createElement('style');
     style.id = '__diatom_si_styles';
@@ -184,7 +146,6 @@ function createDOM() {
   `;
 
   overlay.appendChild(panel);
-  // [v0.6.0 OPT-01] Load external shadow-index.css on first open
   if (typeof loadStylesheet === 'function') loadStylesheet('/shadow-index.css');
   document.body.appendChild(overlay);
 
@@ -193,12 +154,10 @@ function createDOM() {
   _inputEl   = panel.querySelector('#__diatom_si_input');
   _resultsEl = panel.querySelector('#__diatom_si_results');
 
-  // Close on overlay click
   overlay.addEventListener('click', e => {
     if (e.target === overlay) close();
   });
 
-  // Input → search
   _inputEl.addEventListener('input', e => {
     _query = e.target.value.trim();
     _selected = -1;
@@ -207,10 +166,8 @@ function createDOM() {
     _debounce = setTimeout(doSearch, DEBOUNCE_MS);
   });
 
-  // Keyboard navigation
   _inputEl.addEventListener('keydown', handleKeyNav);
 
-  // Toolbar filters
   panel.querySelectorAll('.si-tb-btn[data-filter]').forEach(btn => {
     btn.addEventListener('click', () => {
       panel.querySelectorAll('.si-tb-btn[data-filter]').forEach(b => b.classList.remove('active'));
@@ -220,7 +177,6 @@ function createDOM() {
     });
   });
 
-  // Bias View toggle
   panel.querySelector('#__diatom_si_bias_btn').addEventListener('click', () => {
     _biasMode = !_biasMode;
     panel.querySelector('#__diatom_si_bias_btn').classList.toggle('active', _biasMode);
@@ -232,10 +188,7 @@ function createDOM() {
 
 let _activeFilter = 'all';
 
-// ── Search ────────────────────────────────────────────────────────────────────
-
 async function doSearch() {
-  // [BUG-3 FIX] Guard against ghost IPC: panel may have closed during the 280ms debounce window.
   if (!_open || !_query) return;
   _searching = true;
   _resultsEl.innerHTML = `
@@ -266,8 +219,6 @@ async function doSearch() {
   }
 }
 
-// ── Render ────────────────────────────────────────────────────────────────────
-
 function renderEmpty() {
   _resultsEl.innerHTML = `
     <div class="si-empty">
@@ -285,7 +236,6 @@ function filterResults(results) {
   if (_activeFilter === 'human_curated') {
     return results.filter(r => r.quality_tier === 'human_curated');
   }
-  // Simple content-type heuristics based on URL/domain
   if (_activeFilter === 'article') {
     return results.filter(r => {
       const u = (r.url || '').toLowerCase();
@@ -398,7 +348,6 @@ function renderResults() {
   let html = '';
 
   if (_biasMode) {
-    // Group by lean
     const leanOrder = ['left','centerleft','center','centerright','right','unknown'];
     const groups = {};
     leanOrder.forEach(l => groups[l] = []);
@@ -434,17 +383,14 @@ function renderResults() {
 
   _resultsEl.innerHTML = html;
 
-  // Bias spectrum at bottom when in bias mode
   if (_biasMode && _results.length > 0) {
     const biasDom = document.createElement('div');
     biasDom.innerHTML = biasSpectrumHTML(_results);
     _panelEl.insertBefore(biasDom.firstElementChild, _panelEl.querySelector('.si-footer'));
 
-    // Click lean slot → filter to that lean
     _panelEl.querySelectorAll('.si-spectrum-slot[data-lean]').forEach(slot => {
       slot.addEventListener('click', () => {
         const lean = slot.dataset.lean;
-        // highlight results of that lean by scrolling to first
         const first = _resultsEl.querySelector(`[data-url]`);
         if (first) {
           const items = Array.from(_resultsEl.querySelectorAll('.si-result-item'));
@@ -455,7 +401,6 @@ function renderResults() {
     });
   }
 
-  // Wire click handlers
   _resultsEl.querySelectorAll('.si-result-item').forEach(item => {
     item.addEventListener('click', e => {
       const url = item.dataset.url;
@@ -483,8 +428,6 @@ function updateCount() {
     countEl.textContent = `${n} result${n !== 1 ? 's' : ''} · local · ${_results.length > n ? `${_results.length} total` : 'all shown'}`;
   }
 }
-
-// ── Keyboard navigation ───────────────────────────────────────────────────────
 
 function handleKeyNav(e) {
   const items = _resultsEl ? Array.from(_resultsEl.querySelectorAll('.si-result-item')) : [];
@@ -529,8 +472,6 @@ function updateSelection(items) {
   }
 }
 
-// ── Navigation ────────────────────────────────────────────────────────────────
-
 function openResult(url, newTab) {
   close();
   if (newTab) {
@@ -539,8 +480,6 @@ function openResult(url, newTab) {
     location.href = url;
   }
 }
-
-// ── Open / Close ──────────────────────────────────────────────────────────────
 
 function open() {
   if (_open) { _inputEl?.focus(); return; }
@@ -559,7 +498,6 @@ function open() {
     _inputEl?.focus();
   });
 
-  // Trap focus
   document.addEventListener('keydown', trapEsc, true);
 }
 
@@ -569,7 +507,6 @@ function close() {
   clearTimeout(_debounce);
 
   const overlay = document.getElementById(OVERLAY_ID);
-  // Remove bias block if present
   _panelEl?.querySelector('.si-bias-block')?.remove();
   if (overlay) {
     overlay.style.animation = 'none';
@@ -589,8 +526,6 @@ function close() {
 function trapEsc(e) {
   if (e.key === 'Escape') { e.preventDefault(); close(); }
 }
-
-// ── Freeze shortcut ───────────────────────────────────────────────────────────
 
 async function freezeCurrentPage() {
   try {
@@ -618,10 +553,7 @@ function showFreezeToast(msg) {
   setTimeout(() => t.remove(), 2800);
 }
 
-// ── Global keyboard shortcuts ─────────────────────────────────────────────────
-
 document.addEventListener('keydown', e => {
-  // ⌘⇧F / Ctrl⇧F → open / close search panel
   if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === OPEN_KEY) {
     e.preventDefault();
     if (_open) close();
@@ -629,16 +561,12 @@ document.addEventListener('keydown', e => {
     return;
   }
 
-  // ⌘⇧S / Ctrl⇧S → freeze current page
   if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === FREEZE_KEY) {
-    // Don't intercept normal Ctrl+S (page-save) — only when combined with Shift
     e.preventDefault();
     freezeCurrentPage();
     return;
   }
 }, { capture: true });
-
-// ── Public API ────────────────────────────────────────────────────────────────
 
 export const shadowIndex = {
   open,
@@ -656,3 +584,4 @@ export const shadowIndex = {
 };
 
 window.__diatom_shadow_index = shadowIndex;
+
