@@ -13,21 +13,19 @@ env:
 jobs:
   check:
     name: Lint & Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
 
-      - name: Install system dependencies (Linux)
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -35,53 +33,42 @@ jobs:
             libayatana-appindicator3-dev librsvg2-dev \
             patchelf
 
-      - name: Cargo fmt check
+      - run: cargo fmt --all -- --check
         working-directory: src-tauri
-        run: cargo fmt --all -- --check
 
-      - name: Cargo clippy
+      - run: cargo clippy --all-targets --all-features -- -D warnings
         working-directory: src-tauri
-        run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Cargo test
+      - run: cargo test --all-features
         working-directory: src-tauri
-        run: cargo test --all-features
 
-      # PHILOSOPHY.md enforcement: no telemetry endpoints
-      - name: Check — no Diatom telemetry endpoints
+      - name: Check no telemetry endpoints
         run: |
           if grep -r "diatom\.io\|api\.diatom\|telemetry\.diatom" src-tauri/src/ 2>/dev/null | grep -v "^Binary"; then
-            echo "❌ Telemetry endpoint found — violates PHILOSOPHY.md §8"
+            echo "Telemetry endpoint found — violates AXIOMS.md §8"
             exit 1
           fi
-          echo "✅ No telemetry endpoints"
 
-      # Binary size gate: ≤ 15 MB (PHILOSOPHY.md §6)
       - name: Build release binary
         working-directory: src-tauri
         run: cargo build --release --no-default-features --features custom-protocol
 
-      - name: Check binary size ≤ 15 MB
+      - name: Check binary size <= 15 MB
         run: |
           BINARY=$(find src-tauri/target/release -maxdepth 1 -name "diatom" -o -name "diatom.exe" | head -1)
-          if [ -z "$BINARY" ]; then echo "Binary not found — skip size check"; exit 0; fi
+          [ -z "$BINARY" ] && echo "Binary not found — skip" && exit 0
           SIZE=$(stat -c%s "$BINARY" 2>/dev/null || stat -f%z "$BINARY")
           SIZE_MB=$(echo "scale=2; $SIZE / 1048576" | bc)
-          echo "Binary size: ${SIZE_MB} MB"
-          if [ "$SIZE" -gt $((15 * 1024 * 1024)) ]; then
-            echo "❌ Binary exceeds 15 MB limit (${SIZE_MB} MB) — violates PHILOSOPHY.md §6"
-            exit 1
-          fi
-          echo "✅ Binary within 15 MB limit (${SIZE_MB} MB)"
+          echo "Binary: ${SIZE_MB} MB"
+          [ "$SIZE" -gt $((15 * 1024 * 1024)) ] && echo "Exceeds 15 MB limit" && exit 1
+          exit 0
 
   security:
     name: Security Audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
-      - name: Run audit
+      - uses: taiki-e/install-action@cargo-audit
+      - run: cargo audit
         working-directory: src-tauri
-        run: cargo audit
