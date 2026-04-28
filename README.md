@@ -123,7 +123,7 @@ Re-open at any time via `diatom://onboarding`.
 ### Development
 
 ```bash
-git clone https://github.com/Ansel-S/Diatom.git
+git clone https://github.com/asong56/Diatom.git
 cd Diatom
 cargo tauri dev
 ```
