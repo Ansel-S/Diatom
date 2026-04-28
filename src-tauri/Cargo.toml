@@ -1,11 +1,11 @@
 [package]
 name        = "diatom"
 version     = "1.0.0"
-edition     = "2024"
-authors     = ["Ansel-S <https://github.com/Ansel-S>"]
+edition     = "2026"
+authors     = ["asong56 <https://github.com/asong56>"]
 description = "Minimalist · zero-tracking · local-AI-native browser"
 license     = "BUSL-1.1"
-repository  = "https://github.com/Ansel-S/Diatom"
+repository  = "https://github.com/asong56/Diatom"
 keywords    = ["browser", "privacy", "tauri", "rust"]
 categories  = ["web-programming"]
 
@@ -29,7 +29,6 @@ diatom_bridge = { path = "../shell/crates/diatom_bridge" }
 # `secure` feature adds per-segment randomisation and inline canaries.
 mimalloc = { version = "0.1", default-features = false, features = ["secure"] }
 
-# Only the sub-features Diatom actually calls (saves ~60–80 KB vs "full").
 tokio = { version = "1", features = [
     "rt-multi-thread",
     "sync",
@@ -39,7 +38,7 @@ tokio = { version = "1", features = [
     "process",
     "macros",
 ] }
-tokio-util = { version = "0.7", default-features = false, features = ["sync"] }
+tokio-util = { version = "0.7" }
 
 serde      = { version = "1", features = ["derive"] }
 serde_json = "1"
