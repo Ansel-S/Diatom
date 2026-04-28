@@ -7,7 +7,7 @@
 //! │  SYSTEM  (tool schema + role declaration)  ~300 tok  │
 //! │  USER    step description                  ~20 tok   │
 //! │  USER    live page state (DOM summary)     ~200 tok  │
-//! │  [assistant turns from retries, if any]   ~100 tok  │
+//! │  [assistant turns from retries, if any]   ~100 tok   │
 //! └──────────────────────────────────────────────────────┘
 //! ```
 //!
@@ -78,9 +78,12 @@ pub async fn decide(
 
     // Start the conversation with the live page state.
     let mut messages = vec![
-        ChatMessage { role: "system".into(), content: system },
         ChatMessage {
-            role:    "user".into(),
+            role: "system".into(),
+            content: system,
+        },
+        ChatMessage {
+            role: "user".into(),
             content: format!(
                 "Here is the current page state:\n{}",
                 page_ctx.to_prompt_text()
@@ -94,7 +97,7 @@ pub async fn decide(
         if attempt > 0 {
             // Append the previous (bad) assistant output and a correction nudge.
             messages.push(ChatMessage {
-                role:    "assistant".into(),
+                role: "assistant".into(),
                 content: last_error.clone(),
             });
             messages.push(ChatMessage {
@@ -165,7 +168,6 @@ mod tests {
             dom_summary: "x".repeat(2_000),
         };
         let text = ctx.to_prompt_text();
-        // The dom section is capped at 1_500 chars.
         assert!(text.len() < 1_650);
     }
 }
