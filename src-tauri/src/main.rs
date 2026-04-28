@@ -1,36 +1,62 @@
+//! Diatom backend process.
+//!
+//! Manages all browser state: tabs, storage, privacy engine, ad blocker,
+//! local AI, and sync.  Does not render UI — the visible browser chrome is
+//! rendered by the `diatom-shell` GPUI process, communicating via the
+//! [`diatom_bridge`] Unix-domain-socket protocol.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-pub mod engine;
-pub mod privacy;
-pub mod storage;
 pub mod ai;
-pub mod browser;
+pub mod agent_commands;
 pub mod auth;
-pub mod sync;
-pub mod features;
-
-pub mod state;
+pub mod browser;
 pub mod commands;
+pub mod engine;
+pub mod features;
+pub mod privacy;
+pub mod research;
+pub mod state;
+pub mod storage;
+pub mod sync;
 pub mod utils;
 
 use state::AppState;
 
-
 fn main() {
+    if let Err(e) = run() {
+        eprintln!("Diatom startup error: {e:#}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> anyhow::Result<()> {
     let initial_power = features::sentinel::power_budget_current();
+
+    let app_data = tauri::api::path::app_data_dir(&tauri::Config::default())
+        .ok_or_else(|| anyhow::anyhow!("could not resolve app data directory"))?;
+
+    let state = AppState::new(app_data, initial_power)
+        .map_err(|e| anyhow::anyhow!("AppState initialisation failed: {e:#}"))?;
 
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .manage(AppState::new(
-            tauri::api::path::app_data_dir(&tauri::Config::default())
-                .expect("app_data_dir"),
-            initial_power,
-        ).expect("AppState::new"))
+        .manage(state)
+        .manage(agent_commands::ActiveAgent::new())
         .invoke_handler(tauri::generate_handler![
+            agent_commands::cmd_agent_start,
+            agent_commands::cmd_agent_abort,
+            agent_commands::cmd_agent_tool_result,
+            commands::cmd_history_search,
+            commands::cmd_history_clear,
+            commands::cmd_bookmark_add,
+            commands::cmd_bookmark_list,
+            commands::cmd_bookmark_remove,
+            commands::cmd_setting_get,
+            commands::cmd_setting_set,
             commands::cmd_net_monitor_log,
             commands::cmd_net_monitor_clear,
             commands::cmd_bandwidth_set_global,
@@ -46,6 +72,7 @@ fn main() {
             commands::cmd_ohttp_status,
             commands::cmd_onion_suggest,
             commands::cmd_threat_check,
+            commands::cmd_threat_list_refresh,
             commands::cmd_wifi_scan,
             commands::cmd_wifi_trust_network,
             commands::cmd_wifi_distrust_network,
@@ -56,6 +83,7 @@ fn main() {
             commands::cmd_museum_get,
             commands::cmd_museum_delete,
             commands::cmd_museum_touch_access,
+            commands::cmd_museum_thaw,
             commands::cmd_museum_deep_dig,
             commands::cmd_storage_report,
             commands::cmd_storage_evict_lru,
@@ -69,20 +97,30 @@ fn main() {
             commands::cmd_slm_status,
             commands::cmd_slm_complete,
             commands::cmd_slm_reset,
+            commands::cmd_slm_set_model,
+            commands::cmd_slm_server_toggle,
             commands::cmd_ai_rename_suggest,
             commands::cmd_shadow_search,
             commands::cmd_mcp_status,
+            commands::cmd_mcp_session_token,
             commands::cmd_tabs_list,
-            commands::cmd_tab_open,
+            commands::cmd_tabs_state,
+            commands::cmd_tab_create,
             commands::cmd_tab_close,
             commands::cmd_tab_activate,
+            commands::cmd_tab_update,
+            commands::cmd_tab_sleep,
+            commands::cmd_tab_wake,
+            commands::cmd_tab_budget_config_set,
             commands::cmd_tab_limit_get,
             commands::cmd_tab_limit_set,
             commands::cmd_tab_proxy_set,
             commands::cmd_tab_proxy_get,
             commands::cmd_tab_proxy_remove,
+            commands::cmd_tab_screenshot,
             commands::cmd_dom_crush,
             commands::cmd_dom_blocks_for,
+            commands::cmd_dom_block_remove,
             commands::cmd_boosts_for_domain,
             commands::cmd_boosts_list,
             commands::cmd_boost_upsert,
@@ -101,6 +139,7 @@ fn main() {
             commands::cmd_zen_status,
             commands::cmd_zen_activate,
             commands::cmd_zen_deactivate,
+            commands::cmd_zen_set_aphorism,
             commands::cmd_rss_feeds_list,
             commands::cmd_rss_feed_add,
             commands::cmd_rss_feed_remove,
@@ -129,42 +168,82 @@ fn main() {
             let app_handle = app.handle().clone();
             let state: tauri::State<AppState> = app.state();
 
-            let blocker_arc = state.live_blocker.clone();
+            // Fetch built-in filter lists; exits cleanly on window close.
+            let blocker  = state.live_blocker.clone();
+            let shutdown = state.shutdown_token.clone();
             tauri::async_runtime::spawn(async move {
-                engine::blocker::boot_fetch_builtin_lists(blocker_arc).await;
+                tokio::select! {
+                    _ = engine::blocker::boot_fetch_builtin_lists(blocker) => {},
+                    _ = shutdown.cancelled() => {
+                        tracing::info!("blocker: boot fetch cancelled by shutdown");
+                    },
+                }
             });
 
+            // Start the local AI server if the lab is enabled.
             if features::labs::is_lab_enabled(&state.db, "slm_server") {
-                let slm_cache = state.slm_cache.clone();
-                let db2 = state.db.clone();
+                let privacy_mode = state.privacy.read()
+                    .map(|p| p.extreme_mode).unwrap_or(false);
+                let slm_cache    = state.slm_cache.clone();
+                let slm_tok_ref  = state.slm_shutdown_token.clone();
+                let slm_shutdown = tokio_util::sync::CancellationToken::new();
+                *slm_tok_ref.lock().unwrap() = Some(slm_shutdown.clone());
+                let preferred = state.db
+                    .get_setting("slm_preferred_model")
+                    .unwrap_or_else(|| "diatom-balanced".to_owned());
+
                 tauri::async_runtime::spawn(async move {
-                    ai::slm::ensure_slm_running(&slm_cache, &db2).await;
+                    let server = std::sync::Arc::new(
+                        ai::slm::SlmServer::new(privacy_mode, Some(&preferred)).await,
+                    );
+                    *slm_cache.lock().await = Some(server.clone());
+                    ai::slm::run_server(server, slm_shutdown).await;
+                    tracing::info!("SLM server exited");
                 });
             }
 
-            let token = state.window_ready_token.clone();
-            let handle2 = app_handle.clone();
+            // Sentinel UA-normalisation loop — delayed 10 s so startup paint
+            // is not blocked by network requests.
+            {
+                let handle   = app_handle.clone();
+                let shutdown = state.shutdown_token.clone();
+                tauri::async_runtime::spawn(async move {
+                    features::sentinel::run_sentinel_loop(handle, 10, shutdown).await;
+                });
+            }
+
+            // Show the window once the shell signals readiness, or after 3 s.
+            let token    = state.window_ready_token.clone();
+            let handle   = app_handle.clone();
+            let shutdown = state.shutdown_token.clone();
             tauri::async_runtime::spawn(async move {
                 tokio::select! {
-                    _ = token.cancelled() => {}
-                    _ = tokio::time::sleep(std::time::Duration::from_secs(3)) => {
-                        if let Some(w) = handle2.get_webview_window("main") {
-                            let _ = w.show();
-                        }
-                    }
+                    _ = token.cancelled()   => {}
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(3)) => {}
+                    _ = shutdown.cancelled() => { return; }
+                }
+                if let Some(w) = handle.get_webview_window("main") {
+                    let _ = w.show();
                 }
             });
 
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Destroyed = event {
-                if let Some(state) = window.try_state::<AppState>() {
-                    state.shutdown_token.cancel();
+            // Cancel all background tasks on close or process teardown.
+            match event {
+                tauri::WindowEvent::CloseRequested { .. }
+                | tauri::WindowEvent::Destroyed => {
+                    if let Some(state) = window.try_state::<AppState>() {
+                        state.shutdown_token.cancel();
+                        if let Ok(mut tok) = state.slm_shutdown_token.lock() {
+                            if let Some(t) = tok.take() { t.cancel(); }
+                        }
+                    }
                 }
+                _ => {}
             }
         })
         .run(tauri::generate_context!())
-        .expect("diatom failed to start");
+        .map_err(|e| anyhow::anyhow!("Diatom backend failed: {e:#}"))
 }
-

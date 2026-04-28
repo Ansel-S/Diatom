@@ -1,40 +1,19 @@
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeatureLegal {
     pub id: &'static str,
     pub display_name: &'static str,
-    pub legal_class: &'static str, // how we frame it in law
+    pub legal_class: &'static str,
     pub requires_consent: bool,
-    pub consent_text: &'static str, // shown to user before activation
+    pub consent_text: &'static str,
     pub controls: &'static [&'static str],
     pub residual_risk: &'static str,
 }
 
 /// All features with non-trivial legal surface area.
 pub static FEATURE_LEGAL_REGISTRY: &[FeatureLegal] = &[
-    FeatureLegal {
-        id: "decoy_traffic",
-        display_name: "Privacy Noise Injection",
-        legal_class: "Defensive privacy noise — equivalent to a browser's fingerprint randomisation. \
-                      NOT commercial click fraud: no ad clicks, no form submissions, no revenue diversion.",
-        requires_consent: true,
-        consent_text: "Privacy noise injection sends anonymous requests to public pages in the background to disrupt ad tracking profiles. \
-                       All requests strictly comply with the target site's robots.txt, capped at 1 request per 8 seconds per domain. \
-                       This feature does not simulate ad clicks or any commercial behaviour.",
-        controls: &[
-            "robots.txt compliance enforced in decoy.rs before every request",
-            "rate limit: max 1 req/8s per domain, max 3 domains per session",
-            "GET only: no POST, no form submissions, no ad-click endpoints",
-            "full request log written to local DB for user audit",
-            "explicit opt-in required; disabled by default",
-        ],
-        residual_risk: "Some jurisdictions may still classify as unwanted automated access. \
-                        Users in the EU/UK should consult local counsel before enabling.",
-    },
     FeatureLegal {
         id: "dom_crusher",
         display_name: "DOM Crusher (Permanent Element Blocking)",
@@ -54,46 +33,25 @@ pub static FEATURE_LEGAL_REGISTRY: &[FeatureLegal] = &[
     },
     FeatureLegal {
         id: "ghost_redirect",
-        display_name: "Ghost Redirect (Offline Semantic Fallback)",
+        display_name: "Museum Archive Suggestion (Offline Fallback)",
         legal_class: "Local file search — equivalent to macOS Spotlight surfacing a locally \
                       cached file. Only surfaces content the USER personally froze on their \
-                      own device. Does not fetch, mirror, or distribute third-party content.",
+                      own device. Does not fetch, mirror, or distribute third-party content. \
+                      Presents a passive suggestion banner; never auto-redirects without user action.",
         requires_consent: false,
         consent_text: "",
         controls: &[
-            "BYOD only: Ghost Redirect only indexes user-frozen E-WBN bundles",
+            "BYOD only: indexes user-frozen E-WBN bundles exclusively",
             "no P2P sharing of frozen pages between users",
             "no automatic background crawling of third-party sites",
             "stale-content warning shown for bundles > 30 days old",
-            "Mesh E-WBN transfer is end-to-end encrypted; never forms a public pool",
+            "user must click a link to navigate — no silent redirect",
         ],
         residual_risk: "Frozen pages may contain copyrighted content. Diatom does not screen \
                         content at freeze time. Users are responsible for compliance with \
                         applicable copyright law when freezing pages.",
     },
-    FeatureLegal {
-        id: "echo_analysis",
-        display_name: "The Echo (Persona Evolution Reflection)",
-        legal_class: "Local self-reflection tool. All computation runs on-device in a Wasm \
-                      sandbox. No data is transmitted to any server. Not a medical or \
-                      psychological diagnostic tool.",
-        requires_consent: true,
-        consent_text: "The Echo computes locally on your device and uploads no data to any server. \
-                       Its results are for personal self-reflection only — not a psychological diagnosis or professional assessment. \
-                       You can export or delete all Echo data at any time.",
-        controls: &[
-            "all computation in Wasm sandbox with no filesystem/network access",
-            "raw reading events are purged after Echo computation via memzero",
-            "EchoInput contains only aggregated weights — no URLs, no titles",
-            "GDPR Article 15 export via echo_export.js",
-            "GDPR Article 17 deletion available in settings",
-            "non-medical disclaimer shown before first use",
-        ],
-        residual_risk: "Persona analysis may constitute 'profiling' under GDPR Article 4(4) \
-                        even when performed locally. The absence of a data controller (Diatom \
-                        has no backend) likely removes the Article 22 automated-decision concern, \
-                        but users in highly regulated jurisdictions should verify.",
-    },
+    // Echo (Persona Evolution Reflection) removed — P1 deletion. See architecture doc §3.5.
     FeatureLegal {
         id: "mesh_sync",
         display_name: "Diatom Mesh (Local Network Sync)",
@@ -113,40 +71,24 @@ pub static FEATURE_LEGAL_REGISTRY: &[FeatureLegal] = &[
     },
 ];
 
-
 /// Check whether the user has consented to a feature that requires it.
-/// Returns Err with the consent text if consent is not yet recorded.
 pub fn check_consent(feature_id: &str, db: &crate::storage::db::Db) -> Result<(), String> {
     let feature = FEATURE_LEGAL_REGISTRY.iter().find(|f| f.id == feature_id);
-
-    let Some(f) = feature else {
-        return Ok(());
-    };
-    if !f.requires_consent {
-        return Ok(());
-    }
-
+    let Some(f) = feature else { return Ok(()); };
+    if !f.requires_consent { return Ok(()); }
     let key = format!("consent:{}", feature_id);
-    if db.get_setting(&key).as_deref() == Some("true") {
-        return Ok(());
-    }
-
+    if db.get_setting(&key).as_deref() == Some("true") { return Ok(()); }
     Err(f.consent_text.to_owned())
 }
 
-/// Record that the user has consented to a feature.
 pub fn record_consent(feature_id: &str, db: &crate::storage::db::Db) -> anyhow::Result<()> {
-    let key = format!("consent:{}", feature_id);
-    db.set_setting(&key, "true")
+    db.set_setting(&format!("consent:{}", feature_id), "true")
 }
 
-/// Revoke consent (user turns feature off in settings).
 pub fn revoke_consent(feature_id: &str, db: &crate::storage::db::Db) -> anyhow::Result<()> {
-    let key = format!("consent:{}", feature_id);
-    db.set_setting(&key, "false")
+    db.set_setting(&format!("consent:{}", feature_id), "false")
 }
 
-/// Get the legal metadata for a feature (exposed to UI for transparency).
 pub fn feature_legal(feature_id: &str) -> Option<&'static FeatureLegal> {
     FEATURE_LEGAL_REGISTRY.iter().find(|f| f.id == feature_id)
 }
@@ -159,11 +101,8 @@ mod tests {
     fn all_consent_features_have_text() {
         for f in FEATURE_LEGAL_REGISTRY {
             if f.requires_consent {
-                assert!(
-                    !f.consent_text.is_empty(),
-                    "Feature '{}' requires consent but has no consent text",
-                    f.id
-                );
+                assert!(!f.consent_text.is_empty(),
+                    "Feature '{}' requires consent but has no consent text", f.id);
             }
         }
     }
@@ -171,12 +110,14 @@ mod tests {
     #[test]
     fn all_features_have_controls() {
         for f in FEATURE_LEGAL_REGISTRY {
-            assert!(
-                !f.controls.is_empty(),
-                "Feature '{}' has no compliance controls listed",
-                f.id
-            );
+            assert!(!f.controls.is_empty(),
+                "Feature '{}' has no compliance controls listed", f.id);
         }
     }
-}
 
+    #[test]
+    fn no_decoy_traffic_in_registry() {
+        assert!(FEATURE_LEGAL_REGISTRY.iter().all(|f| f.id != "decoy_traffic"),
+            "decoy_traffic must not appear in the legal registry");
+    }
+}

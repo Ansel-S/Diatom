@@ -1,6 +1,3 @@
-// diatom/src-tauri/src/utils.rs  — v7
-// Shared pure helpers used across modules.
-
 /// Extract the bare hostname (no www.) from a URL string.
 pub fn domain_of(url: &str) -> String {
     url::Url::parse(url)

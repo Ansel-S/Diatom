@@ -15,7 +15,6 @@ const FUEL_PER_CALL: u64 = 10_000_000;
 /// Wall-clock timeout per plugin call.
 const CALL_TIMEOUT_MS: u64 = 100;
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginManifest {
     /// Unique ID (UUID v4), assigned on install.
@@ -51,23 +50,12 @@ pub struct PluginPanelResult {
     pub html: String,
 }
 
-
 /// A sandboxed Wasm plugin instance.
 ///
-/// NOTE: In the v0.10.0 release, this is a *structural* implementation.
-/// Wasmtime's Component Model support and WASI Preview 2 are available since
-/// Wasmtime 16+ but require the `wasmtime-wasi` + `wasmtime` crates, which
-/// add ~4 MB to the binary.  The sandbox interface is fully defined here;
-/// the `wasmtime` dependency will be feature-gated in the next release to
-/// keep the default binary under 8 MB:
-///
-///   [features]
-///   plugin-sandbox = ["wasmtime", "wasmtime-wasi"]
-///
-/// Until then, the `call_*` methods return a capability-check error when
-/// invoked, so the UI can show "Plugin sandbox: coming in v0.11.0".
-/// All data structures, manifest handling, hashing, and IPC commands are
-/// fully implemented and functional.
+/// Wasmtime sandboxing is feature-gated (`plugin-sandbox` feature flag) to
+/// keep the default binary under 8 MB. Without the feature, `call_*` methods
+/// return a capability-check error. All data structures, manifest handling,
+/// hashing, and IPC commands are fully implemented.
 pub struct WasmPlugin {
     pub manifest: PluginManifest,
     wasm_bytes: Vec<u8>,
@@ -90,7 +78,6 @@ impl WasmPlugin {
         if wasm_bytes.len() < 4 || &wasm_bytes[..4] != b"\x00asm" {
             bail!("not a valid Wasm binary");
         }
-
 
         let manifest = PluginManifest {
             id: Uuid::new_v4(),
@@ -149,7 +136,6 @@ impl WasmPlugin {
         self.wasm_bytes.len()
     }
 }
-
 
 /// In-memory registry of loaded plugins.  Persisted to the DB by commands.rs.
 #[derive(Default)]

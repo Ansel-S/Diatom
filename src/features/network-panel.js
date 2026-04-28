@@ -204,12 +204,3 @@ function matchesFilter(entry) {
     || String(entry.status).includes(_filter);
 }
 
-const _devnetBC = new BroadcastChannel('diatom:devnet');
-let _reqCount = 0;
-
-function emitNetEntry(id, url, method, status, durationMs, blockedBy) {
-  _devnetBC.postMessage({
-    type: 'NET_ENTRY',
-    entry: { id, url, method, status, durationMs, blockedBy, ts: Date.now() },
-  });
-}

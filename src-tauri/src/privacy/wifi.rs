@@ -39,7 +39,6 @@ pub struct TrustedNetwork {
     pub added_at: i64,
 }
 
-
 /// Detect the currently connected Wi-Fi network.
 /// Returns None if not connected to Wi-Fi or detection fails.
 pub fn detect_current_network() -> Option<WifiInfo> {
@@ -168,7 +167,6 @@ fn parse_kv(text: &str, key: &str) -> Option<String> {
         .and_then(|l| l.splitn(2, ':').nth(1))
         .map(|v| v.trim().to_owned())
 }
-
 
 /// Check whether a given (ssid, bssid) pair is in the trusted networks list.
 pub fn is_trusted(db: &crate::storage::db::Db, ssid: &str, bssid: &str) -> bool {

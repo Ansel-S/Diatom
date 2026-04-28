@@ -3,11 +3,25 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, sync::LazyLock};
 
-
-/// Compile-time embedded blocklist.
-/// [FIX-THREAT-01] Expanded from 13 stub entries to a production-grade set covering
-/// cryptominers, phishing infrastructure, malware C2, typosquats, and known RAT hosts.
-/// Updated before each release; supplement with the weekly URLhaus live-fetch.
+/// Compile-time embedded blocklist — startup seed.
+///
+/// This list is loaded at process start and serves as the minimum protection
+/// baseline before the dynamic list is fetched.  It is intentionally static
+/// and conservative: only domains with extremely high confidence of malice and
+/// near-zero false-positive risk are included here.
+///
+/// # Dynamic extension
+///
+/// At runtime `AppState.threat_list` (a `RwLock<HashSet<String>>`) is
+/// populated by the sentinel loop's URLhaus fetch (see `sentinel.rs`).
+/// `check_local()` checks BOTH this static set and the live set, so new
+/// threats are picked up as soon as the next fetch completes — without
+/// requiring a recompile or restart.
+///
+/// # Update cadence
+/// The static list is updated before each release via the standard release
+/// checklist. Do NOT add domains here speculatively; the dynamic list is the
+/// right place for time-sensitive threat intelligence.
 static EMBEDDED_THREATS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     [
         "coinhive.com", "coin-hive.com", "minero.cc", "cryptoloot.pro",
@@ -79,7 +93,7 @@ static EMBEDDED_THREATS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
 /// Impact: ~15 ns → ~3 ns on the hot path for unknown-safe domains.
 /// Fast-path pre-check: the 16 most commonly blocked domains checked as a
 /// static sorted array before the HashSet lookup.
-/// [FIX-THREAT-01] Expanded and updated to reflect current threat landscape.
+
 const FAST_PATH_DOMAINS: &[&str] = &[
     "coinhive.com",
     "coin-hive.com",
@@ -99,7 +113,6 @@ const FAST_PATH_DOMAINS: &[&str] = &[
     "formbook-c2.net",
 ];
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ThreatLevel {
     Clean,
@@ -116,17 +129,14 @@ pub struct ThreatResult {
     pub check_source: String,
 }
 
-
-/// Normalise a domain for threat lookups: lowercase, strip www. and m. prefixes.
-/// This fixes the v0.9.0 gap where mobile subdomains like "m.phishing.com"
-/// would not match the blocklist entry "phishing.com".
+/// Normalise a domain for threat lookups: lowercase, strip www. and m. prefixes
+/// so that mobile subdomains like "m.phishing.com" match the entry "phishing.com".
 fn normalise(domain: &str) -> &str {
     let d = domain.trim();
     let d = d.strip_prefix("www.").unwrap_or(d);
     let d = d.strip_prefix("m.").unwrap_or(d);
     d
 }
-
 
 /// Check domain against the embedded + live threat list.
 /// The live list is passed in from AppState (caller reads from DB / cache).
@@ -155,7 +165,6 @@ pub fn check_local(domain: &str, live_list: &HashSet<String>) -> ThreatLevel {
     ThreatLevel::Clean
 }
 
-
 /// Query Quad9 DoH for a domain. NXDOMAIN → Malicious. Any error → assume Clean.
 pub async fn check_quad9(domain: &str) -> Result<ThreatLevel> {
     let query = build_dns_query(domain)?;
@@ -180,7 +189,7 @@ pub async fn check_quad9(domain: &str) -> Result<ThreatLevel> {
 fn build_dns_query(domain: &str) -> Result<Vec<u8>> {
     let mut msg = Vec::with_capacity(64);
     let dns_id: [u8; 2] = rand::random();
-    msg.extend_from_slice(&dns_id); // [FIX-04] Random ID per query
+    msg.extend_from_slice(&dns_id);
     msg.extend_from_slice(&[0x01, 0x00]); // QR=0, Opcode=0, RD=1
     msg.extend_from_slice(&[0x00, 0x01]); // QDCOUNT=1
     msg.extend_from_slice(&[0x00, 0x00]); // ANCOUNT=0
@@ -214,7 +223,6 @@ fn parse_dns_response(bytes: &[u8]) -> ThreatLevel {
     }
 }
 
-
 /// Check if a domain was registered very recently (potential phishing setup).
 pub async fn check_domain_age(domain: &str) -> ThreatLevel {
     let url = format!("https://api.whoapi.com/?domain={domain}&r=whois&apikey=free");
@@ -246,7 +254,6 @@ pub async fn check_domain_age(domain: &str) -> ThreatLevel {
     }
     ThreatLevel::Clean
 }
-
 
 /// Evaluate a domain through all available threat signals.
 /// Returns the highest-severity finding.
@@ -305,7 +312,6 @@ pub async fn evaluate_domain(
         check_source: "clean".to_owned(),
     }
 }
-
 
 /// Fetch the latest URLhaus domain-only export and return as a HashSet.
 pub async fn fetch_live_list() -> Result<HashSet<String>> {

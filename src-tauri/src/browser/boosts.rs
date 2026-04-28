@@ -15,7 +15,6 @@ pub struct BoostRule {
     pub created_at: i64,
 }
 
-
 pub fn builtin_boosts() -> Vec<BoostRule> {
     vec![
         BoostRule {
@@ -48,7 +47,6 @@ pub fn builtin_boosts() -> Vec<BoostRule> {
     ]
 }
 
-
 /// Returns true if `boost.domain` matches `page_domain`.
 /// Wildcards: "*" matches everything. "reddit.com" also matches "www.reddit.com".
 pub fn domain_matches(boost_domain: &str, page_domain: &str) -> bool {
@@ -61,7 +59,6 @@ pub fn domain_matches(boost_domain: &str, page_domain: &str) -> bool {
     let suffix = format!(".{}", boost_domain.to_lowercase());
     page_domain.to_lowercase().ends_with(&suffix)
 }
-
 
 /// Insert or replace a Boost rule in the DB.
 pub fn upsert(db: &crate::storage::db::Db, rule: &BoostRule) -> Result<()> {

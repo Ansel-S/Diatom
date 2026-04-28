@@ -1,4 +1,3 @@
-
 'use strict';
 
 import { invoke, listen, emit } from './ipc.js';
@@ -7,15 +6,15 @@ import { applyCrusherRules } from '../features/dom-crusher.js';
 import { showInterstitial as zenInterstitial, isActive as zenIsActive } from '../features/zen.js';
 import { startHealthMonitor } from './compat.js';
 
-let _tabs      = [];           // Array<Tab> from Rust
-let _activeId  = null;
+let _tabs         = [];       // Array<Tab> from Rust
+let _activeId     = null;
 
-let _dwellStart   = Date.now();
-let _scrollVelocity = 0;       // running average px/s
-let _lastScrollY  = 0;
-let _lastScrollTs = Date.now();
-let _tabSwitches  = 0;
-let _readingMode  = false;
+let _dwellStart    = Date.now();
+let _scrollVelocity = 0;     // exponential moving average, px/s
+let _lastScrollY   = 0;
+let _lastScrollTs  = Date.now();
+let _tabSwitches   = 0;
+let _readingMode   = false;
 
 let _worker = null;
 
@@ -27,24 +26,12 @@ export async function initTabs(worker) {
   _activeId = state.active_id;
   render();
 
-  await listen('diatom:tab_created', t => {
-    _tabs.push(t);
-    render();
-  });
-  await listen('diatom:tab_closed', id => {
-    _tabs = _tabs.filter(t => t.id !== id);
-    render();
-  });
-  await listen('diatom:tabs_updated', st => {
-    _tabs       = st.tabs;
-    _activeId   = st.active_id;
-    render();
-  });
+  await listen('diatom:tab_created',  t  => { _tabs.push(t); render(); });
+  await listen('diatom:tab_closed',   id => { _tabs = _tabs.filter(t => t.id !== id); render(); });
+  await listen('diatom:tabs_updated', st => { _tabs = st.tabs; _activeId = st.active_id; render(); });
 
-  document.addEventListener('keydown', onGlobalKey);
-
-  document.addEventListener('scroll', onScroll, { passive: true });
-
+  document.addEventListener('keydown',          onGlobalKey);
+  document.addEventListener('scroll',           onScroll,           { passive: true });
   document.addEventListener('visibilitychange', onVisibilityChange);
 
   loadMuseumIndex();
@@ -52,25 +39,20 @@ export async function initTabs(worker) {
 
 export async function navigate(rawUrl) {
   const url = resolveUrl(rawUrl);
-
   const nav = await invoke('cmd_preprocess_url', { url });
 
   if (nav.blocked) {
     flashBlockIndicator(nav.clean_url);
     return;
   }
-
   if (nav.zen_blocked) {
     const decision = await zenInterstitial(domainOf(nav.clean_url), nav.zen_category);
     if (decision !== 'unlocked') return;
   }
 
   flushReadingEvent();
-
   loadUrl(nav.clean_url);
-
   loadCrusherRulesForDomain(domainOf(nav.clean_url));
-
   checkThreatAsync(domainOf(nav.clean_url));
 }
 
@@ -82,16 +64,16 @@ function loadUrl(url) {
   _navAbort = new AbortController();
   emit('diatom:navigate', { url });
 
-  try { startHealthMonitor(url); } catch {}
+  try { startHealthMonitor(url); }             catch {}
   try { window.__diatom_tos_auditor?.onNavigate(url); } catch {}
-  try { window.__diatom_shadow_index?.close?.(); } catch {}
+  try { window.__diatom_shadow_index?.close?.(); }      catch {}
 
-  _dwellStart    = Date.now();
+  _dwellStart     = Date.now();
   _scrollVelocity = 0;
-  _lastScrollY   = window.scrollY;
-  _lastScrollTs  = Date.now();
-  _tabSwitches   = 0;
-  _readingMode   = false;
+  _lastScrollY    = window.scrollY;
+  _lastScrollTs   = Date.now();
+  _tabSwitches    = 0;
+  _readingMode    = false;
 }
 
 export async function createTab(url = 'about:blank') {
@@ -107,10 +89,7 @@ export async function closeTab(tabId) {
   _tabs = _tabs.filter(t => t.id !== tabId);
   if (_activeId === tabId) {
     const fallback = _tabs[_tabs.length - 1];
-    if (!fallback) {
-      await createTab();
-      return;
-    }
+    if (!fallback) { await createTab(); return; }
     _activeId = fallback.id;
     if (_activeId) await invoke('cmd_tab_activate', { tab_id: _activeId });
   }
@@ -119,11 +98,11 @@ export async function closeTab(tabId) {
 
 export async function activateTab(tabId) {
   if (tabId === _activeId) return;
-  flushReadingEvent();    // record dwell for current tab
+  flushReadingEvent();
   _tabSwitches++;
   _activeId = tabId;
   await invoke('cmd_tab_activate', { tab_id: tabId });
-  _dwellStart   = Date.now();
+  _dwellStart     = Date.now();
   _scrollVelocity = 0;
   _lastScrollY    = window.scrollY;
   _lastScrollTs   = Date.now();
@@ -161,7 +140,6 @@ export async function freezeCurrentPage() {
     }
 
     playFreezeSound();
-
     showFreezeConfirmation(tab.title);
   } catch (err) {
     console.error('[Freeze] failed:', err);
@@ -177,13 +155,13 @@ function triggerFreezeAnimation() {
 
 function playFreezeSound() {
   try {
-    const ctx   = new AudioContext();
-    const buf   = ctx.createBuffer(1, ctx.sampleRate * 0.04, ctx.sampleRate);
-    const data  = buf.getChannelData(0);
+    const ctx  = new AudioContext();
+    const buf  = ctx.createBuffer(1, ctx.sampleRate * 0.04, ctx.sampleRate);
+    const data = buf.getChannelData(0);
     for (let i = 0; i < data.length; i++) {
       data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.008));
     }
-    const src = ctx.createBufferSource();
+    const src  = ctx.createBufferSource();
     src.buffer = buf;
     const gain = ctx.createGain();
     gain.gain.value = 0.12;
@@ -191,6 +169,7 @@ function playFreezeSound() {
     gain.connect(ctx.destination);
     src.start();
     src.onended = () => ctx.close();
+  } catch { /* AudioContext unavailable */ }
 }
 
 function showFreezeConfirmation(title) {
@@ -206,18 +185,16 @@ function showFreezeConfirmation(title) {
   document.body.appendChild(msg);
   setTimeout(() => {
     msg.style.transition = 'opacity .4s';
-    msg.style.opacity = '0';
+    msg.style.opacity    = '0';
     setTimeout(() => msg.remove(), 420);
   }, 2000);
 }
 
 function onScroll() {
-  const now   = Date.now();
-  const dy    = Math.abs(window.scrollY - _lastScrollY);
-  const dt    = (now - _lastScrollTs) / 1000;
-  if (dt > 0) {
-    _scrollVelocity = _scrollVelocity * 0.7 + (dy / dt) * 0.3;
-  }
+  const now = Date.now();
+  const dy  = Math.abs(window.scrollY - _lastScrollY);
+  const dt  = (now - _lastScrollTs) / 1000;
+  if (dt > 0) _scrollVelocity = _scrollVelocity * 0.7 + (dy / dt) * 0.3;
   _lastScrollY  = window.scrollY;
   _lastScrollTs = now;
 }
@@ -236,7 +213,7 @@ function flushReadingEvent() {
   if (!tab || tab.url === 'about:blank') return;
 
   const dwellMs = Date.now() - _dwellStart;
-  if (dwellMs < 500) return;   // ignore flickers
+  if (dwellMs < 500) return;
 
   const event = {
     url:          tab.url,
@@ -246,12 +223,10 @@ function flushReadingEvent() {
     tab_switches: _tabSwitches,
   };
 
-  if (_worker) {
-    _worker.postMessage({ id: uid(), type: 'READING_EVENT', payload: event });
-  }
+  _worker?.postMessage({ id: uid(), type: 'READING_EVENT', payload: event });
 
-  _dwellStart   = Date.now();
-  _tabSwitches  = 0;
+  _dwellStart  = Date.now();
+  _tabSwitches = 0;
 }
 
 export function setReadingMode(active) {
@@ -264,26 +239,20 @@ async function loadCrusherRulesForDomain(domain) {
     if (rules?.length) {
       applyCrusherRules(rules);
       const bc = new BroadcastChannel('diatom:sw');
-      bc.postMessage({
-        type:      'CRUSHER_RULES',
-        domain,
-        selectors: rules.map(r => r.selector),
-      });
+      bc.postMessage({ type: 'CRUSHER_RULES', domain, selectors: rules.map(r => r.selector) });
       bc.close();
     }
+  } catch { /* non-critical */ }
 }
 
 async function checkThreatAsync(domain) {
   try {
     const result = await invoke('cmd_threat_check', { domain });
-    if (result.level === 'Malicious') {
-      showThreatBanner(result.reason);
-    } else if (result.level === 'Suspicious') {
-      showThreatHint(result.reason);
-    }
+    if (result.flagged) showThreatBanner(domain);
+  } catch { /* non-critical */ }
 }
 
-function showThreatBanner(reason) {
+function showThreatBanner(domain) {
   const bar = document.createElement('div');
   bar.style.cssText = `
     position:fixed; top:0; left:0; right:0; z-index:99998;
@@ -292,29 +261,17 @@ function showThreatBanner(reason) {
     padding:.4rem 1rem; text-align:center;
     border-bottom:1px solid rgba(239,68,68,.3);
   `;
-  bar.textContent = `⚠ ${reason}`;
+  bar.textContent = `⚠ Threat detected: ${domain}`;
   const dismiss = document.createElement('button');
   dismiss.style.cssText = 'margin-left:.75rem;background:none;border:none;color:#fca5a5;cursor:pointer;';
-  dismiss.textContent = 'Continue anyway';
+  dismiss.textContent   = 'Continue anyway';
   dismiss.addEventListener('click', () => bar.remove());
   bar.appendChild(dismiss);
   document.body.prepend(bar);
 }
 
-function showThreatHint(reason) {
-  const omni = qs('#omnibox');
-  if (omni) {
-    omni.style.borderColor = '#d97706';
-    omni.title = reason;
-    setTimeout(() => {
-      omni.style.borderColor = '';
-      omni.title = '';
-    }, 8000);
-  }
-}
-
 function flashBlockIndicator(url) {
-  const domain = domainOf(url);
+  const domain    = domainOf(url);
   const indicator = document.createElement('div');
   indicator.style.cssText = `
     position:fixed; top:.75rem; right:.75rem; z-index:99997;
@@ -326,7 +283,7 @@ function flashBlockIndicator(url) {
   document.body.appendChild(indicator);
   setTimeout(() => {
     indicator.style.transition = 'opacity .3s';
-    indicator.style.opacity = '0';
+    indicator.style.opacity    = '0';
     setTimeout(() => indicator.remove(), 320);
   }, 1200);
 }
@@ -334,13 +291,12 @@ function flashBlockIndicator(url) {
 async function loadMuseumIndex() {
   if (!_worker) return;
   try {
-    const bundles = await invoke('cmd_museum_list', { limit: 500 });
-    if (bundles?.length) {
-      _worker.postMessage({
-        id: uid(), type: 'MUSEUM_LOAD',
-        payload: { entries: bundles },
-      });
+    const resp    = await invoke('cmd_museum_list', { limit: 500 });
+    const bundles = resp?.bundles ?? [];
+    if (bundles.length) {
+      _worker.postMessage({ id: uid(), type: 'MUSEUM_LOAD', payload: { entries: bundles } });
     }
+  } catch { /* non-critical */ }
 }
 
 function workerRpc(type, payload) {
@@ -350,8 +306,7 @@ function workerRpc(type, payload) {
     const handler = ({ data }) => {
       if (data.id !== id) return;
       _worker.removeEventListener('message', handler);
-      if (data.error) reject(new Error(data.error));
-      else resolve(data.result);
+      data.error ? reject(new Error(data.error)) : resolve(data.result);
     };
     _worker.addEventListener('message', handler);
     _worker.postMessage({ id, type, payload });
@@ -361,20 +316,10 @@ function workerRpc(type, payload) {
 function onGlobalKey(e) {
   const mod = e.metaKey || e.ctrlKey;
   if (!mod) return;
-
   switch (e.key) {
-    case 't':
-      e.preventDefault();
-      createTab();
-      break;
-    case 'w':
-      e.preventDefault();
-      if (_activeId) closeTab(_activeId);
-      break;
-    case 's':
-      e.preventDefault();
-      freezeCurrentPage();
-      break;
+    case 't': e.preventDefault(); createTab();                              break;
+    case 'w': e.preventDefault(); if (_activeId) closeTab(_activeId);      break;
+    case 's': e.preventDefault(); freezeCurrentPage();                     break;
   }
 }
 
@@ -386,18 +331,16 @@ function render() {
   for (const tab of _tabs) {
     const btn = el('button', `tab-btn${tab.id === _activeId ? ' active' : ''}`);
     btn.dataset.tabId = tab.id;
-    btn.title = tab.url;
+    btn.title         = tab.url;
     btn.innerHTML = `
       <span class="tab-title">${escHtml(tab.title.slice(0, 60) || domainOf(tab.url))}</span>
       <span class="tab-sleep">${sleepIcon(tab.sleep)}</span>
       <button class="tab-close" data-tab-id="${tab.id}" aria-label="Close tab">×</button>
     `;
-
     btn.addEventListener('click', e => {
       if (e.target.classList.contains('tab-close')) return;
       activateTab(tab.id);
     });
-
     bar.appendChild(btn);
   }
 
@@ -410,6 +353,5 @@ function render() {
 }
 
 function sleepIcon(sleep) {
-  return { Awake: '', Shallow: '·', Deep: '💤', Evicted: '·' }[sleep] ?? '';
+  return { Awake: '', ShallowSleep: '·', DeepSleep: '💤' }[sleep] ?? '';
 }
-

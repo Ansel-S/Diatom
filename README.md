@@ -2,8 +2,11 @@
 
 **A minimalist, privacy-first, local-AI browser.**
 
+[![License: BUSL-1.1](https://img.shields.io/badge/License-BUSL--1.1-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-1.78+-orange.svg)](https://rustup.rs)
+[![GPUI](https://img.shields.io/badge/GPUI-shell-purple.svg)](https://github.com/zed-industries/zed/tree/main/crates/gpui)
 [![Binary](https://img.shields.io/badge/binary-%E2%89%A410MB-green.svg)](#)
-[![Status](https://img.shields.io/badge/status-v0.14.3-yellow.svg)](AXIOMS.md)
+[![Status](https://img.shields.io/badge/status-v1.0.0-green.svg)](AXIOMS.md)
 
 Most browsers are a window that lets you see the internet. Diatom is a filter that keeps the internet from seeing you.
 
@@ -38,21 +41,22 @@ Diatom runs entirely on your device. No accounts. No cloud sync. No analytics. N
 | Feature | Description |
 |---|---|
 | **Native ad blocking** | Aho-Corasick automaton — tracker requests are dropped before they reach the renderer |
-| **Fingerprint normalisation** | Canvas / WebGL / Audio / navigator APIs normalised to the statistical mode of common desktop hardware. Deterministic per-domain, invisible to sites. |
-| **E-WBN encrypted archive** | AES-256-GCM + tracker stripping + TF-IDF indexing + FTS5 full-text search. Freeze any page to your personal Museum |
+| **Fingerprint normalisation** | Canvas, WebGL, Audio, and navigator APIs normalised to the statistical mode of common desktop hardware. Deterministic and invisible to sites. |
+| **Museum (encrypted archive)** | AES-256-GCM encrypted page snapshots with tracker stripping, TF-IDF indexing, and FTS5 full-text search. |
 | **Native RSS** | Zero plugins. RSS 2.0 / Atom parser with TF-IDF auto-tagging and reading mode |
 | **Built-in 2FA** | TOTP/HOTP engine that auto-detects 2FA forms and fills in the code |
-| **Local AI (Resonance Modes)** | OpenAI-compatible server at `127.0.0.1:11435`. Curated models: Qwen 2.5 3B, Phi-4 Mini, Gemma 3 4B. Other local apps (VS Code, Obsidian) can use Diatom as their AI backend |
-| **The Echo** | Weekly persona spectrum (Scholar / Builder / Leisure) computed entirely on-device in a Wasm sandbox. Raw data is zeroed after computation. No data leaves the device |
+| **Local AI (Resonance)** | OpenAI-compatible endpoint at `127.0.0.1:11435`. Curated models: Qwen 2.5 3B, Phi-4 Mini, Gemma 3 4B. Shared with VS Code / Obsidian via the same endpoint. |
+| **The Echo** | Weekly persona spectrum computed on-device in a Wasm sandbox. Raw data is zeroed after each computation. |
 | **DOM Crusher** | Ctrl+click any page element to permanently hide it. Rules persist per-domain |
 | **Zen Mode** | Blocks social and entertainment sites during focus sessions. Unlocking requires typing a 50-character intent declaration — this is a ritual, not a barrier |
-| **Vision Overlay** | Alt+drag to select any screen region → local Tesseract OCR → optional local translation |
-| **Ghost Redirect** | When offline, semantically matches the failed URL against your personal Museum and surfaces similar archived pages |
-| **Compatibility Router** | Detects broken pages and offers a clean system browser handoff (tracking parameters stripped before handing off) |
+| **Vision Overlay** | Alt-drag any region → local Tesseract OCR → optional local translation. |
+| **Ghost Redirect** | Offline fallback: semantically matches a failed URL against the Museum and surfaces similar archived pages. |
+| **Compatibility Router** | Detects broken pages and hands off to the system browser with tracking parameters stripped. |
 | **Accessibility** | Full ARIA injection + keyboard navigation for every chrome element |
-| **Adaptive tab budget** | Three interlocking models: resource-aware scaling, golden ratio zones (Focus 61.8% / Buffer 38.2%), and screen gravity (3 tabs on phone → 13 on ultrawide) |
+| **Adaptive tab budget** | Resource-aware scaling; sleep timer shortens as the tab count approaches the configured limit. |
 | **diatom://labs** | 22 experimental features — AI, privacy, performance, sync, interface — each with an honest stability and risk rating |
-| **DevPanel** | Developer tools with "Open in Zed" — one click opens the current page's source file in the external Zed IDE. Resonance AI shares context with Zed via `~/.diatom/resonance.sock` |
+| **DevPanel** | Developer tools with one-click "Open in Zed". Resonance AI shares page context via `~/.diatom/resonance.sock`. |
+| **GPUI shell** | Tab bar, address bar, and toolbar rendered by GPUI. No HTML, CSS, or JS in the chrome layer. |
 
 ---
 
@@ -178,23 +182,20 @@ Type directly in the address bar:
 
 ```
 Diatom/
-├── src-tauri/
-│   ├── src/
-│   │   ├── main.rs           Tauri entry + module registration
-│   │   ├── engine/           Blocker, bandwidth, ETag cache, monitor, GhostPipe, compat, plugins
-│   │   ├── privacy/          PrivacyConfig, fingerprint_norm, PIR, OHTTP, onion, threat, wifi
-│   │   ├── storage/          SQLite DB, vault, E-WBN freeze, storage guard, Museum versioning
-│   │   ├── ai/               SLM microkernel, download renamer, shadow index, MCP host
-│   │   ├── browser/          Tab lifecycle, tab limit, per-tab proxy, DOM crusher, boosts, a11y
-│   │   ├── auth/             TOTP/2FA, platform passkeys, domain trust levels
-│   │   ├── sync/             Nostr relay, Noise_XX P2P transport, knowledge marketplace
-│   │   └── features/         Zen, RSS, panic button, breach monitor, search, pricing radar,
-│   │                         ToS auditor, local file bridge, Sentinel, War Report, Labs, compliance
-│   ├── resources/
-│   │   └── diatom-api.js     Injected into every page
-│   └── Cargo.toml
+├── src-tauri/         Tauri backend (blocker, privacy, storage, AI, sync)
+│   └── src/
+│       ├── main.rs           Tauri entry + module registration
+│       ├── engine/           Blocker, bandwidth, ETag cache, monitor, GhostPipe, compat, plugins
+│       ├── privacy/          PrivacyConfig, fingerprint_norm, PIR, OHTTP, onion, threat, wifi
+│       ├── storage/          SQLite DB, vault, E-WBN freeze, storage guard, Museum versioning
+│       ├── ai/               SLM microkernel, download renamer, shadow index, MCP host
+│       ├── browser/          Tab lifecycle, tab limit, per-tab proxy, DOM crusher, boosts, a11y
+│       ├── auth/             TOTP/2FA, platform passkeys, domain trust levels
+│       ├── sync/             Nostr relay, Noise_XX P2P transport, knowledge marketplace
+│       └── features/         Zen, RSS, panic button, breach monitor, search, pricing radar,
+│                             ToS auditor, local file bridge, Sentinel, War Report, Labs, compliance
 │
-├── src/
+├── src/               Browser frontend (JS, CSS, UI pages)
 │   ├── main.js               Boot sequence
 │   ├── sw.js                 Service Worker (intercept + Ghost Redirect + Zen)
 │   ├── index.html            Browser chrome
@@ -202,20 +203,28 @@ Diatom/
 │   ├── browser/              Core browser modules (ipc, tabs, hotkey, lustre…)
 │   ├── features/             Feature panels (echo, zen, dom-crusher…)
 │   ├── workers/
-│   │   └── core.worker.js   TF-IDF + OPFS + Echo scheduler + idle indexing
+│   │   └── core.worker.js    TF-IDF + OPFS + Echo scheduler + idle indexing
 │   └── ui/
 │       ├── about.html        diatom://about
 │       └── labs.html         diatom://labs
 │
-├── zed-integration/          DevPanel + Resonance context bridge + Zed IDE link
-│   ├── src-tauri/            Tauri commands for DevPanel, fingerprint_norm, url_stripper
-│   └── zed-core/             diatom_bridge, diatom_devtools crates
+├── shell/             First-party GPUI sidecar workspace
+│   └── crates/
+│       ├── diatom_bridge/    IPC protocol + Resonance UDS server
+│       ├── diatom_shell/     GPUI browser chrome (tab bar, toolbar, omnibox)
+│       └── diatom_devtools/  GPUI DevTools panel
 │
-├── AXIOMS.md                 Project axioms — inviolable constraints
-├── README.md                 This file — guide + philosophy
-└── LICENSE                   BUSL-1.1, Change Date 2028, Change License MIT
+├── zed-vendor/        Stripped Zed editor core (managed by strip-zed.sh)
+│   └── crates/        gpui, editor, lsp, rope, theme, …
+│
+├── scripts/
+│   └── strip-zed.sh   Strips Zed telemetry/collab crates before each build
+│
+├── AXIOMS.md          Project axioms — inviolable constraints
+├── INTEGRATION.md     Editor core integration guide
+├── README.md          This file — guide + philosophy
+└── LICENSE            BUSL-1.1, Change Date 2028, Change License MIT
 ```
-
 ---
 
 ## Philosophy

@@ -281,5 +281,3 @@ export async function showCrusherRules() {
 
   document.body.appendChild(panel);
 }
-
-

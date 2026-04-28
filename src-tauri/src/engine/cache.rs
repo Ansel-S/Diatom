@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 
 /// Cached conditional-GET metadata for a single filter list URL.
 ///
-/// [B-01 FIX] The `content` field has been removed entirely.
+
 /// The body is NEVER stored in the DB — only the ETag and Last-Modified headers
 /// that allow us to send a conditional GET on the next cold start.
 /// If the server replies 304, we treat it as a prompt to re-download the full
@@ -24,7 +24,7 @@ pub fn url_cache_key(url: &str) -> String {
 
 /// Load cached ETag + Last-Modified for `url` from the database.
 ///
-/// [B-01 FIX] No longer loads a cached body.
+
 pub fn load(db: &crate::storage::db::Db, url: &str) -> CachedResponse {
     let key = url_cache_key(url);
     let etag          = db.get_setting(&format!("{key}:etag"));
@@ -33,10 +33,8 @@ pub fn load(db: &crate::storage::db::Db, url: &str) -> CachedResponse {
 }
 
 /// Persist ETag and Last-Modified headers after a 200 OK response.
-///
-/// [B-01 FIX] Does NOT persist the rule body. The body is held only in-memory
-/// via live_blocker. On next cold start, the conditional GET will either fetch
-/// fresh content (200) or prompt a full re-download (304 → unconditional GET).
+/// The rule body is held only in-memory; on next cold start the conditional
+/// GET either fetches fresh content (200) or triggers a full re-download (304).
 pub fn store(
     db: &crate::storage::db::Db,
     url: &str,
@@ -59,17 +57,10 @@ pub fn store(
 /// Perform a conditional HTTP GET for `url`.
 ///
 /// Sends If-None-Match / If-Modified-Since if cached values exist.
-///
-/// [B-01 FIX] The old API returned `Ok(None)` for 304 Not Modified and let
-/// callers use the (truncated, broken) cached body. The new contract:
+/// On 304, performs an unconditional GET to retrieve the complete rule set.
 ///
 ///   Ok(content)  — fresh content fetched (200 or 304→full re-download)
 ///   Err(_)       — network/HTTP error
-///
-/// On 304, this function performs an unconditional GET (without conditional
-/// headers) to retrieve the complete rule set. The bandwidth saving from ETag
-/// caching is preserved when the content genuinely hasn't changed (200 OK
-/// with an identical body), but we never fall back to a truncated DB body.
 pub async fn conditional_get(
     client: &reqwest::Client,
     url: &str,
@@ -137,9 +128,7 @@ mod tests {
         assert_ne!(k1, k2);
     }
 
-    /// [B-01 FIX] Verify CachedResponse no longer carries a content field.
-    /// This compile-time check ensures we can't accidentally re-introduce
-    /// the truncated-body cache pattern.
+    /// Compile-time check: CachedResponse must not carry a body field.
     #[test]
     fn cached_response_has_no_body_field() {
         let cr = CachedResponse {

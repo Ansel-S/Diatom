@@ -3,7 +3,6 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompatTier {
@@ -11,7 +10,6 @@ pub enum CompatTier {
     CompatHint,          // degraded detected — show indicator, offer handoff
     SystemBrowserQueued, // user accepted handoff, pending open()
 }
-
 
 /// Domains where Diatom proactively shows a compatibility indicator (⚠)
 /// on first visit, offering system browser handoff.
@@ -46,7 +44,6 @@ impl Default for CompatTier {
     }
 }
 
-
 /// Reported by the injected diatom-api.js after page load.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PageHealthReport {
@@ -66,7 +63,6 @@ impl PageHealthReport {
             || (self.js_errors >= 2 && self.console_errors >= 10)
     }
 }
-
 
 #[derive(Default)]
 pub struct CompatStore {
@@ -104,7 +100,6 @@ impl CompatStore {
     }
 }
 
-
 /// Strip tracking params, then hand off to the OS default browser.
 /// This is the ONLY path where Diatom yields the render entirely.
 /// Called from cmd_compat_handoff.
@@ -117,7 +112,7 @@ pub fn system_browser_open(url: &str) -> Result<()> {
 /// Build the compat hint HTML banner injected into degraded pages.
 /// The "Open in system browser" button calls window.__diatom_compat_handoff()
 /// which is defined by diatom-api.js and invokes cmd_compat_handoff via IPC.
-/// [FIX-13-compat] Previously this called an undefined function; now it works.
+
 pub fn compat_hint_banner(domain: &str) -> String {
     format!(
         r#"<div id="__diatom_compat" style="
@@ -139,7 +134,6 @@ pub fn compat_hint_banner(domain: &str) -> String {
     )
     .replace("__DOMAIN__", &crate::utils::escape_html(domain))
 }
-
 
 /// Known payment/banking domains that require system browser handoff.
 /// These sites use proprietary NPAPI-era ActiveX/plugin-based verification

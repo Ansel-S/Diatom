@@ -12,7 +12,6 @@ type HmacSha1   = Hmac<Sha1>;
 type HmacSha256 = Hmac<Sha256>;
 type HmacSha512 = Hmac<Sha512>;
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum TotpAlgorithm {
@@ -42,7 +41,6 @@ impl TotpAlgorithm {
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, Zeroize)]
 #[zeroize(drop)]
 pub struct TotpEntry {
@@ -67,7 +65,6 @@ pub struct TotpCode {
     pub valid_until: i64,
     pub period:      u32,
 }
-
 
 fn encrypt_secret(secret: &str, master_key: &[u8; 32]) -> Result<String> {
     use aes_gcm::{Aes256Gcm, Nonce, aead::{Aead, KeyInit}};
@@ -94,7 +91,6 @@ fn decrypt_secret(enc_hex: &str, master_key: &[u8; 32]) -> Result<String> {
         .map_err(|_| anyhow::anyhow!("TOTP decrypt failed"))?;
     String::from_utf8(pt).context("totp secret utf8")
 }
-
 
 #[derive(Default)]
 pub struct TotpStore {
@@ -200,7 +196,6 @@ impl TotpStore {
         })
     }
 
-    /// [FIX-05-totp] Exact or leading-dot subdomain match only.
     pub fn match_domain(&self, domain: &str) -> Vec<TotpCode> {
         let dlc = domain.to_lowercase();
         self.entries.values()
@@ -211,7 +206,6 @@ impl TotpStore {
             .filter_map(|e| self.generate(&e.id).ok())
             .collect()
     }
-
 
     pub fn import_aegis(
         &mut self,
@@ -339,7 +333,6 @@ impl TotpStore {
         Ok(n)
     }
 
-
     /// Export all entries to Aegis-compatible unencrypted JSON.
     /// Callers MUST gate this behind biometric auth.
     pub fn export_aegis_json(&self) -> Result<String> {
@@ -372,7 +365,6 @@ impl TotpStore {
             .context("serialize aegis export")
     }
 }
-
 
 pub struct ParsedOtpUri {
     pub issuer:    Option<String>,
@@ -432,7 +424,6 @@ pub fn parse_otpauth_uri(uri: &str) -> Result<ParsedOtpUri> {
     }
     Ok(ParsedOtpUri { issuer, account, secret, algorithm, digits, period })
 }
-
 
 static STEAM_CHARS: [char; 26] = [
     '2','3','4','5','6','7','8','9',

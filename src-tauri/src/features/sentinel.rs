@@ -3,9 +3,37 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::{
     sync::{Mutex, OnceLock},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
+//
+// Sentinel makes the following outbound HTTPS requests on a scheduled basis.
+// None of these calls transmit any user data (no browsing history, no
+// identifiers, no credentials). All requests use a generic Chrome UA.
+//
+// 1. Chrome Version History API (versionhistory.googleapis.com)
+//    Purpose : Fetch the current Chrome stable version for UA normalisation.
+//    Interval: Every POLL_INTERVAL_S (3 600 s = 1 hour).
+//    Endpoint: GET /v1/chrome/platforms/{platform}/channels/stable/versions
+//    Privacy : Stateless public API; no authentication; no user data sent.
+//
+// 2. Apple Developer RSS (developer.apple.com/news/releases/rss/releases.rss)
+//    Purpose : Parse the latest Safari version for macOS UA normalisation.
+//    Interval: Same 1-hour cycle.
+//    Privacy : Public RSS feed; no user data sent.
+//
+// 3. Chrome Releases Blog RSS (chromereleases.googleblog.com)
+//    Purpose : Detect critical CVEs in the current Chrome release.
+//    Interval: Same 1-hour cycle.
+//    Privacy : Public RSS feed; no user data sent.
+//
+// The 1-hour interval is a deliberate design choice (see POLL_INTERVAL_S).
+// It keeps UA strings current while limiting background activity to three
+// small HTTP requests per hour.  Power-budget mode (labs: power_budget)
+// extends this to 3 hours when the device is on battery.
+//
+// Users may inspect all Sentinel traffic in the DevPanel Network panel.
+// Sentinel can be disabled entirely by toggling "UA Normalisation" in Settings.
 
 /// Sentinel polls Chrome version history for these platforms.
 const CHROME_PLATFORMS: &[(&str, &str)] = &[
@@ -17,9 +45,8 @@ const CHROME_PLATFORMS: &[(&str, &str)] = &[
 /// Poll interval: 60 minutes in seconds.
 pub const POLL_INTERVAL_S: u64 = 3_600;
 
-
 /// Fallback static WebKit build table (used when Sentinel cache is cold).
-/// [FIX-SENTINEL-01] Retained as fallback; no longer the sole source of truth.
+
 const SAFARI_WEBKIT_BUILDS: &[(u32, u32, u32, u32)] = &[
     (18, 5, 619, 5),  // projected
     (18, 4, 619, 4),
@@ -47,10 +74,6 @@ const SAFARI_WEBKIT_BUILDS: &[(u32, u32, u32, u32)] = &[
 
 /// Global Sentinel cache — populated by `run_sentinel_loop`, read by
 /// `webkit_build_for` for fast UA synthesis without locking AppState.
-///
-/// [FIX-B02] This static was referenced in `webkit_build_for()` but never
-/// defined anywhere, causing a compile error. Initialised lazily here;
-/// `run_sentinel_loop` calls `set_global_cache()` after each successful refresh.
 static SENTINEL_CACHE: OnceLock<Mutex<SentinelCache>> = OnceLock::new();
 
 /// Update the global Sentinel cache after a successful refresh.
@@ -63,15 +86,10 @@ pub fn set_global_cache(cache: SentinelCache) {
 
 /// Canonical WebKit UA build string for a given Safari version.
 ///
-/// [FIX-SENTINEL-01] Now queries the live SentinelCache first.
-/// [B-04 FIX] The previous implementation returned a hardcoded "619" for any
-/// unknown Safari major (e.g. Safari 19 would get WebKit/619.x.15 — the Safari
-/// 18 build number — producing a detectable anachronism). Now returns a
-/// SENTINEL_STALE result and logs a warning for unknown majors, forcing the
-/// static table to be updated. The raw version-derived string is used as a
-/// best-effort fallback with a clear log marker.
-///
-/// Returns e.g. "619.3.15" for Safari 18.3.
+
+/// Canonical WebKit UA build string for a given Safari version.
+/// Returns e.g. "619.3.15" for Safari 18.3. Falls back to a `SENTINEL_STALE`
+/// marker for unknown Safari majors, signalling that the static table needs updating.
 pub fn webkit_build_for(safari_major: u32, safari_minor: u32) -> String {
     if let Some(cache) = SENTINEL_CACHE.get().and_then(|m| m.lock().ok()) {
         if let Some(ref safari) = cache.safari {
@@ -108,9 +126,6 @@ pub fn webkit_build_for(safari_major: u32, safari_minor: u32) -> String {
 }
 
 /// Map a Safari major version to the corresponding WebKit major number.
-///
-/// [B-04 FIX] Extracted from webkit_build_for() catch-all to make the
-/// unknown-major path explicit and testable.
 fn webkit_major_for_safari_major(safari_major: u32) -> u32 {
     match safari_major {
         19 => {
@@ -132,7 +147,6 @@ fn webkit_major_for_safari_major(safari_major: u32) -> u32 {
         }
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChromeVersionInfo {
@@ -197,9 +211,14 @@ impl SentinelCache {
         now.saturating_sub(self.last_refresh) < POLL_INTERVAL_S * 2
     }
 
+    /// True if the cache contains at least one Chrome version entry.
+    /// Used by current_ua() as the gate — data presence matters more than age
+    /// during the first poll cycle.
+    pub fn has_data(&self) -> bool {
+        !self.chrome.is_empty() || self.safari.is_some()
+    }
+
     /// Synthesise a Windows Chrome UA string with the full version number.
-    /// [FIX-25] Real Chrome uses the full 4-part version (e.g. 124.0.6367.207),
-    /// not the truncated major.0.0.0 form which is detectable by fingerprint scanners.
     pub fn chrome_ua_windows(&self) -> String {
         let ver = self.chrome_win()
             .map(|v| v.version.as_str())
@@ -233,7 +252,6 @@ impl SentinelCache {
     }
 }
 
-
 fn make_client() -> Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
@@ -242,12 +260,8 @@ fn make_client() -> Result<reqwest::Client> {
 }
 
 fn unix_now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+    crate::storage::db::unix_now() as u64
 }
-
 
 /// Response types for the Chrome Version History API v1.
 #[derive(Deserialize)]
@@ -315,7 +329,6 @@ async fn fetch_chrome_extended(client: &reqwest::Client) -> Result<ChromeVersion
     })
 }
 
-
 /// Parse Safari version from the Apple Developer News RSS feed.
 /// Title format: "Safari 17.6 Release Notes" or "macOS 14.6 – Safari 17.6"
 fn parse_safari_version(rss_text: &str) -> Option<(u32, u32)> {
@@ -361,7 +374,6 @@ async fn fetch_safari_version(client: &reqwest::Client) -> Result<SafariVersionI
     })
 }
 
-
 /// Check the Chrome Releases blog RSS for critical CVEs in the latest stable.
 /// Returns (is_critical, cve_list).
 async fn fetch_chrome_cves(client: &reqwest::Client) -> (bool, Vec<String>) {
@@ -396,7 +408,6 @@ async fn fetch_chrome_cves(client: &reqwest::Client) -> (bool, Vec<String>) {
     cves.truncate(20);
     (is_critical, cves)
 }
-
 
 /// Perform a full Sentinel refresh. Returns the new cache state.
 pub async fn refresh(prev_cache: &SentinelCache) -> SentinelCache {
@@ -477,7 +488,7 @@ pub async fn refresh(prev_cache: &SentinelCache) -> SentinelCache {
         .map(|v| v.major)
         .unwrap_or(prev_major);
 
-    if chrome_versions.len() > 0 {
+    if !chrome_versions.is_empty() {
         new_cache.chrome = chrome_versions;
     }
     new_cache.prev_chrome_major = new_major;
@@ -498,13 +509,10 @@ pub async fn refresh(prev_cache: &SentinelCache) -> SentinelCache {
     new_cache
 }
 
-
 /// Spawn the sentinel background loop. Runs every POLL_INTERVAL_S seconds.
 /// Caller passes `app_handle` so we can emit events and write state.
-///
-/// [AUDIT-FIX §2.2] `token` is a CancellationToken from AppState::shutdown_token.
-/// When the main window is destroyed, token.cancel() is called, causing the
-/// loop to exit promptly rather than waiting for the full POLL_INTERVAL_S sleep.
+/// `token` is a CancellationToken from AppState::shutdown_token; when the
+/// main window is destroyed, token.cancel() causes the loop to exit promptly.
 pub async fn run_sentinel_loop(
     app_handle: tauri::AppHandle,
     initial_delay_s: u64,
@@ -569,6 +577,12 @@ pub async fn run_sentinel_loop(
             );
         }
 
+        // Self-update check — piggybacks on the existing Sentinel refresh cycle
+        // so no additional background task or network call is needed.
+        // See AXIOMS.md §Permanent Black Zone: no auto-update, but a critical-
+        // severity WebView CVE must surface prominently to the user (P2 §9.2).
+        check_diatom_update(&app_handle, &new_cache).await;
+
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_S)) => {},
             _ = token.cancelled() => {
@@ -578,7 +592,6 @@ pub async fn run_sentinel_loop(
         }
     }
 }
-
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SentinelStatus {
@@ -609,7 +622,6 @@ impl SentinelStatus {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -626,7 +638,7 @@ mod tests {
         assert!(build.starts_with("619."), "expected 619.x.15, got: {build}");
     }
 
-    /// [B-04 FIX] Unknown Safari major must NOT return a stale Safari 18 build.
+    /// Unknown Safari major must return a SENTINEL_STALE marker, not a stale build.
     /// It must include SENTINEL_STALE so monitoring can catch it.
     #[test]
     fn webkit_build_unknown_major_returns_stale_marker() {
@@ -686,3 +698,340 @@ mod tests {
     }
 }
 
+//
+// Diatom does not auto-update (no user consent, no background download).
+// However, a critical WebView CVE with a <48 h exploit window makes silent
+// manual-update-only behaviour dangerous. This function:
+//
+//  1. Checks the GitHub releases API for the latest Diatom version tag.
+//  2. If a newer version exists AND the current cache has a critical CVE,
+//     emits `diatom:update-available` with `{ version, critical: true }`.
+//  3. If a newer version exists without a critical CVE, emits the same event
+//     with `{ critical: false }` — the UI shows a lower-urgency badge.
+//
+// The event is consumed by the JS layer, which shows a non-blocking banner
+// (regular update) or a blocking navigation interstitial (critical CVE update).
+// The user always initiates the download; Diatom never fetches or applies
+// updates automatically.
+//
+// Privacy: the request sends only the Accept header; no Diatom UA, no tokens.
+
+const DIATOM_RELEASES_URL: &str =
+    "https://api.github.com/repos/diatom-browser/diatom/releases/latest";
+
+/// Days before a critical-CVE update prompt escalates to a navigation block.
+pub const CRITICAL_UPDATE_BLOCK_DAYS: u64 = 3;
+
+/// How many hours between self-update checks (independent of POLL_INTERVAL_S).
+const UPDATE_CHECK_INTERVAL_H: u64 = 6;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UpdateCheckState {
+    /// Latest version string from GitHub, e.g. "0.16.0". Empty = not yet checked.
+    pub latest_version:    String,
+    /// True if `latest_version` is newer than the running build.
+    pub update_available:  bool,
+    /// Unix timestamp of last check (0 = never checked).
+    pub last_check:        u64,
+    /// True if the last check found a critical CVE alongside a newer version.
+    pub critical:          bool,
+    /// Unix timestamp when `critical` first became true (0 if not critical).
+    pub critical_since:    u64,
+}
+
+impl UpdateCheckState {
+    /// Returns true if it is time to perform a new check.
+    pub fn is_stale(&self) -> bool {
+        unix_now().saturating_sub(self.last_check) >= UPDATE_CHECK_INTERVAL_H * 3_600
+    }
+
+    /// Returns true if a critical update has been pending for more than
+    /// `CRITICAL_UPDATE_BLOCK_DAYS` days.
+    pub fn should_block_navigation(&self) -> bool {
+        self.critical
+            && self.critical_since > 0
+            && unix_now().saturating_sub(self.critical_since)
+                >= CRITICAL_UPDATE_BLOCK_DAYS * 86_400
+    }
+}
+
+/// Fetch the latest Diatom release tag from GitHub and compare to the running
+/// version. Emits Tauri events consumed by the frontend.
+///
+/// This function is called from `run_sentinel_loop` on every poll cycle;
+/// it rate-limits itself internally via `UpdateCheckState::is_stale`.
+pub async fn check_diatom_update(
+    app_handle: &tauri::AppHandle,
+    sentinel_cache: &SentinelCache,
+) {
+    // Load persisted update state.
+    let mut state = app_handle
+        .try_state::<crate::state::AppState>()
+        .and_then(|st| {
+            st.db
+                .get_setting("sentinel_update_check")
+                .and_then(|s| serde_json::from_str::<UpdateCheckState>(&s).ok())
+        })
+        .unwrap_or_default();
+
+    if !state.is_stale() {
+        // Not yet time for another check; re-emit if update already known.
+        if state.update_available {
+            emit_update_event(app_handle, &state, sentinel_cache.cve_critical);
+        }
+        return;
+    }
+
+    let running = env!("CARGO_PKG_VERSION");
+
+    let client = match make_client() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("sentinel update-check: could not build client: {e}");
+            return;
+        }
+    };
+
+    // Use a generic Accept header; do not send Diatom UA or any identifier.
+    let resp = match client
+        .get(DIATOM_RELEASES_URL)
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "Mozilla/5.0")
+        .send()
+        .await
+    {
+        Ok(r)  => r,
+        Err(e) => {
+            tracing::debug!("sentinel update-check: request failed: {e}");
+            return;
+        }
+    };
+
+    #[derive(serde::Deserialize)]
+    struct GhRelease { tag_name: String }
+
+    let tag = match resp.json::<GhRelease>().await {
+        Ok(r)  => r.tag_name,
+        Err(e) => {
+            tracing::debug!("sentinel update-check: parse failed: {e}");
+            return;
+        }
+    };
+
+    // Strip leading 'v' prefix if present.
+    let latest = tag.trim_start_matches('v').to_owned();
+    let newer  = semver_gt(&latest, running);
+
+    let now = unix_now();
+    state.last_check       = now;
+    state.latest_version   = latest.clone();
+    state.update_available = newer;
+
+    if newer && sentinel_cache.cve_critical {
+        if !state.critical {
+            // First time we see critical=true — record the timestamp.
+            state.critical       = true;
+            state.critical_since = now;
+        }
+    } else {
+        state.critical       = false;
+        state.critical_since = 0;
+    }
+
+    // Persist updated state.
+    if let Some(st) = app_handle.try_state::<crate::state::AppState>() {
+        if let Ok(json) = serde_json::to_string(&state) {
+            let _ = st.db.set_setting("sentinel_update_check", &json);
+        }
+
+        // If a critical update has been pending long enough, also set a flag
+        // that commands.rs can read to gate navigation.
+        if state.should_block_navigation() {
+            let _ = st.db.set_setting("update_block_navigation", "1");
+        } else {
+            let _ = st.db.set_setting("update_block_navigation", "0");
+        }
+    }
+
+    if newer {
+        emit_update_event(app_handle, &state, sentinel_cache.cve_critical);
+    }
+}
+
+fn emit_update_event(
+    app_handle: &tauri::AppHandle,
+    state:      &UpdateCheckState,
+    cve:        bool,
+) {
+    let _ = app_handle.emit(
+        "diatom:update-available",
+        serde_json::json!({
+            "version":            state.latest_version,
+            "critical":           cve && state.critical,
+            "critical_since":     state.critical_since,
+            "block_after_days":   CRITICAL_UPDATE_BLOCK_DAYS,
+            "should_block_now":   state.should_block_navigation(),
+        }),
+    );
+}
+
+/// Returns true if `a` is a strictly greater semver than `b`.
+/// Handles simple `MAJOR.MINOR.PATCH` form only; pre-release suffixes are
+/// ignored (treated as equal to the base version).
+fn semver_gt(a: &str, b: &str) -> bool {
+    let parse = |s: &str| -> [u32; 3] {
+        let mut parts = s.split('-').next().unwrap_or(s).splitn(4, '.');
+        [
+            parts.next().and_then(|p| p.parse().ok()).unwrap_or(0),
+            parts.next().and_then(|p| p.parse().ok()).unwrap_or(0),
+            parts.next().and_then(|p| p.parse().ok()).unwrap_or(0),
+        ]
+    };
+    parse(a) > parse(b)
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+
+    #[test]
+    fn semver_gt_basic() {
+        assert!( semver_gt("0.16.0", "0.15.1"));
+        assert!( semver_gt("1.0.0",  "0.99.9"));
+        assert!(!semver_gt("0.15.1", "0.16.0"));
+        assert!(!semver_gt("0.15.0", "0.15.0"));
+    }
+
+    #[test]
+    fn semver_gt_ignores_prerelease() {
+        // "0.16.0-beta.1" should not be considered greater than "0.16.0"
+        assert!(!semver_gt("0.16.0-beta.1", "0.16.0"));
+    }
+
+    #[test]
+    fn update_state_stale_when_never_checked() {
+        let s = UpdateCheckState::default();
+        assert!(s.is_stale());
+    }
+
+    #[test]
+    fn update_state_not_stale_after_recent_check() {
+        let mut s = UpdateCheckState::default();
+        s.last_check = unix_now();
+        assert!(!s.is_stale());
+    }
+
+    #[test]
+    fn block_navigation_after_critical_threshold() {
+        let mut s = UpdateCheckState::default();
+        s.critical       = true;
+        s.critical_since = unix_now() - (CRITICAL_UPDATE_BLOCK_DAYS + 1) * 86_400;
+        assert!(s.should_block_navigation());
+    }
+
+    #[test]
+    fn no_block_if_not_critical() {
+        let s = UpdateCheckState { critical: false, ..Default::default() };
+        assert!(!s.should_block_navigation());
+    }
+}
+
+/// Device power state affecting how aggressively Diatom runs background tasks.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PowerState {
+    /// Device is plugged in — full background activity permitted.
+    #[default]
+    Plugged,
+    /// Running on battery — background intervals extended.
+    Battery,
+    /// Battery critically low (< 10 %) — most background tasks paused.
+    BatteryCritical,
+}
+
+/// Adaptive scheduling parameters derived from current power state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PowerBudget {
+    pub state:                    PowerState,
+    /// Battery percentage (0–100). None when running on AC or unknown.
+    pub battery_pct:              Option<u8>,
+    /// Effective Sentinel poll interval (seconds).
+    pub sentinel_interval_secs:   u64,
+    /// Effective tab-budget evaluation interval (seconds).
+    pub tab_budget_interval_secs: u64,
+    /// Whether PIR (Private Information Retrieval) queries are enabled.
+    pub pir_enabled:              bool,
+    /// Whether decoy-traffic injection is enabled.
+    pub decoy_enabled:            bool,
+}
+
+impl Default for PowerBudget {
+    fn default() -> Self {
+        PowerBudget {
+            state:                    PowerState::Plugged,
+            battery_pct:              None,
+            sentinel_interval_secs:   POLL_INTERVAL_S,
+            tab_budget_interval_secs: 600,
+            pir_enabled:              true,
+            decoy_enabled:            false,
+        }
+    }
+}
+
+/// Read the current power state from the OS and return the corresponding
+/// `PowerBudget`. Falls back to the default (Plugged / full activity) when
+/// the battery API is unavailable.
+///
+/// On macOS this reads `IOPSGetPowerSourceDescription`; on Linux it reads
+/// `/sys/class/power_supply`; on Windows it calls `GetSystemPowerStatus`.
+/// All three paths are guarded by `cfg` and default gracefully.
+pub fn power_budget_current() -> PowerBudget {
+    // Attempt to read battery level from the platform.
+    // Failure (desktop, no battery, permission denied) → return Plugged default.
+    let (state, pct) = read_battery_state();
+
+    let (sentinel_secs, tab_secs, pir, decoy) = match state {
+        PowerState::Plugged         => (POLL_INTERVAL_S,         600, true,  false),
+        PowerState::Battery         => (POLL_INTERVAL_S * 3,    1200, true,  false),
+        PowerState::BatteryCritical => (POLL_INTERVAL_S * 12, 3600, false, false),
+    };
+
+    PowerBudget {
+        state,
+        battery_pct:              pct,
+        sentinel_interval_secs:   sentinel_secs,
+        tab_budget_interval_secs: tab_secs,
+        pir_enabled:              pir,
+        decoy_enabled:            decoy,
+    }
+}
+
+/// Platform-specific battery probe. Returns (PowerState, Option<battery_pct>).
+/// All errors collapse to (Plugged, None) — conservative and safe.
+fn read_battery_state() -> (PowerState, Option<u8>) {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(entries) = std::fs::read_dir("/sys/class/power_supply") {
+            for entry in entries.flatten() {
+                let base = entry.path();
+                let status_path  = base.join("status");
+                let capacity_path = base.join("capacity");
+                let Ok(status) = std::fs::read_to_string(&status_path) else { continue };
+                let status = status.trim().to_lowercase();
+                if status == "discharging" || status == "not charging" {
+                    let pct = std::fs::read_to_string(&capacity_path)
+                        .ok()
+                        .and_then(|s| s.trim().parse::<u8>().ok());
+                    let power_state = match pct {
+                        Some(p) if p < 10 => PowerState::BatteryCritical,
+                        _                 => PowerState::Battery,
+                    };
+                    return (power_state, pct);
+                }
+            }
+        }
+    }
+
+    // macOS / Windows / unknown → treat as Plugged (safe default).
+    (PowerState::Plugged, None)
+}

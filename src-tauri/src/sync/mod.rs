@@ -1,4 +1,3 @@
-// diatom/src-tauri/src/sync — v0.14.3
 // P2P synchronisation: Nostr relay, Noise_XX transport, knowledge marketplace.
 pub mod nostr;
 pub mod noise;

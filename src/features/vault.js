@@ -264,4 +264,3 @@ function getInitial(title) {
 }
 
 export default { onNavigate, openVaultPanel };
-

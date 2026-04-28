@@ -1,4 +1,3 @@
-// diatom/src-tauri/src/ai — v0.14.3
 // Local AI: SLM microkernel, download renamer, shadow index, MCP host.
 pub mod slm;
 pub mod renamer;

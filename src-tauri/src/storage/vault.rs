@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use url::Url;
 use zeroize::Zeroize;
 
-
 pub(crate) fn encrypt_field(plaintext: &str, key: &[u8; 32]) -> Result<String> {
     let cipher = Aes256Gcm::new(key.into());
     let mut nonce_bytes = [0u8; 12];
@@ -37,7 +36,6 @@ pub(crate) fn decrypt_field(enc_hex: &str, key: &[u8; 32]) -> Result<String> {
         .map_err(|_| anyhow::anyhow!("vault decrypt failed"))?;
     String::from_utf8(pt).context("vault plaintext utf8")
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -92,7 +90,6 @@ pub struct VaultNote {
     pub updated_at: i64,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginSummary {
     pub id: String,
@@ -125,7 +122,6 @@ pub struct NoteSummary {
     pub created_at: i64,
     pub updated_at: i64,
 }
-
 
 static WORDLIST: &[&str] = &[
     "apple", "bridge", "castle", "dancer", "earth", "forest", "garden", "harbor",
@@ -221,7 +217,6 @@ pub fn generate_passphrase(cfg: &PassphraseConfig) -> String {
     words.join(&cfg.separator)
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StrengthScore {
     pub score: u8,        // 0–4 (like zxcvbn)
@@ -254,7 +249,6 @@ pub fn score_password(pw: &str) -> StrengthScore {
     };
     StrengthScore { score, label, entropy_bits: entropy }
 }
-
 
 #[derive(Default)]
 pub struct VaultStore {
@@ -346,7 +340,6 @@ impl VaultStore {
             updated_at: raw.updated_at,
         })
     }
-
 
     pub fn add_login(
         &mut self,
@@ -482,7 +475,7 @@ impl VaultStore {
     }
 
     /// Return logins whose URLs match `domain` (exact or subdomain).
-    /// [FIX-vault-match] Same strict leading-dot logic as totp.rs match_domain().
+
     pub fn match_domain(&self, domain: &str) -> Vec<LoginSummary> {
         let dlc = domain.to_lowercase();
         self.logins.values()
@@ -510,7 +503,6 @@ impl VaultStore {
             updated_at: l.updated_at,
         }
     }
-
 
     pub fn add_card(
         &mut self,
@@ -583,7 +575,6 @@ impl VaultStore {
         }
     }
 
-
     pub fn add_note(
         &mut self,
         title: &str,
@@ -640,7 +631,6 @@ impl VaultStore {
         }
     }
 
-
     /// Import from a CSV export.
     /// Recognised columns (case-insensitive):
     ///   `name`/`title`, `username`/`login_username`, `password`/`login_password`,
@@ -694,7 +684,6 @@ impl VaultStore {
         }
         Ok(imported)
     }
-
 
     pub fn stats(&self) -> VaultStats {
         let weak_count = self.logins.values()

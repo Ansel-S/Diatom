@@ -23,9 +23,9 @@ fn sdf_arm(r: f32, theta: f32, complexity: f32, spread: f32) -> f32 {
 }
 
 fn palette(t: f32, sat: f32) -> vec3f {
-  let a = vec3f(0.37, 0.65, 0.98);  // scholar blue
-  let b = vec3f(0.66, 0.55, 0.98);  // builder purple
-  let c = vec3f(0.98, 0.57, 0.24);  // leisure amber
+  let a = vec3f(0.37, 0.65, 0.98);
+  let b = vec3f(0.66, 0.55, 0.98);
+  let c = vec3f(0.98, 0.57, 0.24);
   let col = mix(mix(a, b, clamp(t * 2.0, 0.0, 1.0)),
                 mix(b, c, clamp(t * 2.0 - 1.0, 0.0, 1.0)), step(0.5, t));
   return mix(vec3f(0.5), col, sat);
@@ -246,4 +246,3 @@ export async function renderDiatom(canvas, params) {
     renderDiatomSvg(canvas, params);
   }
 }
-

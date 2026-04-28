@@ -1,10 +1,18 @@
+/// Generic Chrome UA used for filter list update requests.
+///
+/// Never the Diatom-specific UA — third-party filter list CDNs must not be
+/// able to fingerprint Diatom users from their update traffic.
+/// See AXIOMS.md §Known Outbound Network Calls.
+pub const FILTER_FETCH_UA: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
+     AppleWebKit/537.36 (KHTML, like Gecko) \
+     Chrome/124.0.0.0 Safari/537.36";
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
 use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, DNT, HeaderMap, HeaderValue};
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use url::Url;
-
 
 pub const DIATOM_UA_MACOS: &str =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
@@ -17,7 +25,6 @@ pub const DIATOM_UA_WINDOWS: &str =
 pub const DIATOM_UA_LINUX: &str =
     "Mozilla/5.0 (X11; Linux x86_64) \
      AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
-
 
 pub fn platform_fallback_ua() -> &'static str {
     match std::env::consts::OS {
@@ -40,9 +47,7 @@ pub fn dynamic_ua(
     None
 }
 
-
 static BUILTIN_PATTERNS_RAW: &str = include_str!("../resources/builtin_patterns.txt");
-
 
 fn builtin_patterns() -> Vec<&'static str> {
     BUILTIN_PATTERNS_RAW
@@ -59,7 +64,6 @@ static BLOCKER: LazyLock<AhoCorasick> = LazyLock::new(|| {
         .expect("blocker AC build failed")
 });
 
-
 pub fn build_dynamic_blocker(patterns: &[String]) -> AhoCorasick {
     AhoCorasickBuilder::new()
         .match_kind(MatchKind::LeftmostFirst)
@@ -67,7 +71,6 @@ pub fn build_dynamic_blocker(patterns: &[String]) -> AhoCorasick {
         .build(patterns)
         .expect("dynamic blocker AC build failed")
 }
-
 
 const BUILTIN_FILTER_LISTS: &[(&str, &str)] = &[
     (
@@ -124,19 +127,16 @@ const BUILTIN_FILTER_LISTS: &[(&str, &str)] = &[
     ),
 ];
 
-
+/// Parse an ABP/uBlock filter-list text into a flat list of URL patterns.
 ///
 /// Drops:
-///   • Comment lines (`!` prefix)
-
-///   • Exception rules (`@@`)
-
-
+/// - Comment lines prefixed with `!` or `#`.
+/// - Exception rules prefixed with `@@`.
+/// - Cosmetic-filter rules (`##`, `#@#`, `#?#`, `#$#`).
 ///
 /// Keeps and normalises:
-///   • `||domain.com^` → `domain.com`
-
-
+/// - `||domain.com^` → `domain.com`
+/// - Hosts-file entries (`0.0.0.0 domain`) → `domain`
 pub fn parse_filter_list(text: &str) -> Vec<String> {
     let mut patterns = Vec::with_capacity(4096);
     for line in text.lines() {
@@ -181,9 +181,10 @@ pub fn parse_filter_list(text: &str) -> Vec<String> {
     patterns
 }
 
-
+/// Fetch all built-in filter lists over HTTPS and build the live automaton.
 ///
-
+/// Called once at startup. The live automaton replaces the static built-in
+/// patterns after the first successful fetch.
 pub async fn boot_fetch_builtin_lists(
     live_blocker: std::sync::Arc<std::sync::RwLock<Option<AhoCorasick>>>,
 ) {
@@ -193,7 +194,7 @@ pub async fn boot_fetch_builtin_lists(
 
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
-        .user_agent(platform_fallback_ua())
+        .user_agent(FILTER_FETCH_UA)
         .build()
     {
         Ok(c) => c,
@@ -246,7 +247,6 @@ pub async fn boot_fetch_builtin_lists(
     }
 }
 
-
 pub fn merge_with_builtins(extra: Vec<String>) -> Vec<String> {
     let mut all: Vec<String> = builtin_patterns().into_iter().map(|s| s.to_string()).collect();
     all.extend(extra);
@@ -255,10 +255,8 @@ pub fn merge_with_builtins(extra: Vec<String>) -> Vec<String> {
     all
 }
 
-
-///
-
-
+/// Check `url` against the live dynamic automaton, with a fallback to the
+/// static built-in automaton when the live one is not yet ready.
 pub fn is_blocked_live(
     url: &str,
     live: &std::sync::RwLock<Option<AhoCorasick>>,
@@ -270,7 +268,6 @@ pub fn is_blocked_live(
     }
     is_blocked(url)
 }
-
 
 /// A compiled cosmetic filter set.
 pub struct CosmeticEngine {
@@ -294,7 +291,6 @@ impl CosmeticEngine {
         }
         engine
     }
-
 
     pub fn add_raw(&mut self, line: &str) {
         let line = line.trim();
@@ -327,7 +323,6 @@ impl CosmeticEngine {
         }
     }
 
-
     pub fn build_style_for_domain(&self, domain: &str) -> String {
         let domain = domain.to_lowercase();
         let domain = domain.trim_start_matches("www.");
@@ -350,7 +345,6 @@ impl CosmeticEngine {
         format!("{} {{ display:none !important; }}", selectors.join(",\n"))
     }
 
-
     pub fn injection_script_for_domain(&self, domain: &str) -> Option<String> {
         let css = self.build_style_for_domain(domain);
         if css.is_empty() { return None; }
@@ -366,7 +360,6 @@ impl Default for CosmeticEngine {
     fn default() -> Self { Self::new() }
 }
 
-
 static BUILTIN_COSMETIC_RULES_RAW: &str = include_str!("../resources/builtin_cosmetic.txt");
 
 fn builtin_cosmetic_rules() -> Vec<&'static str> {
@@ -379,20 +372,6 @@ fn builtin_cosmetic_rules() -> Vec<&'static str> {
 static COSMETIC_ENGINE: LazyLock<CosmeticEngine> = LazyLock::new(CosmeticEngine::new);
 
 pub fn cosmetic_engine() -> &'static CosmeticEngine { &COSMETIC_ENGINE }
-
-
-const STRIP_PARAMS: &[&str] = &[
-    "utm_source", "utm_medium", "utm_campaign", "utm_term",
-    "utm_content", "utm_id", "utm_source_platform", "utm_referrer",
-    "fbclid", "gclid", "gclsrc", "dclid", "gbraid", "wbraid",
-    "msclkid", "tclid", "twclid", "ttclid",
-    "mc_eid", "mc_cid", "_ga", "_gl",
-    "_hsenc", "_hsmi", "igshid", "s_kwcid",
-    "mkt_tok", "mkwid", "pcrid", "ef_id", "gad_source",
-    "ref", "referrer", "source", "__twitter_impression",
-    "click_id", "yclid", "zanpid",
-];
-
 
 #[inline]
 pub fn is_blocked(url: &str) -> bool { BLOCKER.is_match(url) }
@@ -445,32 +424,15 @@ pub fn upgrade_https(url: &str) -> String {
     }
 }
 
-#[inline]
-pub fn upgrade_https_owned(url: &str) -> String { upgrade_https(url) }
+/// Upgrade an http:// URL to https://, except localhost. Returns a new String.
+pub fn upgrade_https_owned(url: &str) -> String {
+    upgrade_https(url).to_owned()
+}
 
+/// Strip known tracking parameters from a URL.
+/// Delegates to the canonical implementation in `url_stripper`.
 pub fn strip_params(url: &str) -> String {
-    let parsed = match Url::parse(url) {
-        Ok(u) => u,
-        Err(_) => return url.to_owned(),
-    };
-    let clean_pairs: Vec<(String, String)> = parsed.query_pairs()
-        .filter(|(k, _)| {
-            let key = k.to_lowercase();
-            !STRIP_PARAMS.iter().any(|p| key == *p || key.starts_with(&format!("{}_", p)))
-        })
-        .map(|(k, v)| (k.into_owned(), v.into_owned()))
-        .collect();
-    let mut out = parsed.clone();
-    if clean_pairs.is_empty() {
-        out.set_query(None);
-    } else {
-        out.set_query(Some(
-            &clean_pairs.iter()
-                .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
-                .collect::<Vec<_>>().join("&"),
-        ));
-    }
-    out.to_string()
+    crate::engine::url_stripper::strip(url).into_owned()
 }
 
 pub fn clean_headers(url: &str, extra_ua: Option<&str>) -> HeaderMap {
@@ -492,12 +454,6 @@ pub fn clean_headers(url: &str, extra_ua: Option<&str>) -> HeaderMap {
         HeaderValue::from_static("1"),
     );
     headers
-}
-
-pub fn domain_of(url: &str) -> String {
-    Url::parse(url).ok()
-        .and_then(|u| u.host_str().map(|h| h.to_owned()))
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

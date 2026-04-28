@@ -443,14 +443,15 @@
   border-color:var(--ink);
 }
 
-from {
-  opacity:0;
-  transform:translateY(8px);
-}
-
-to {
-  opacity:1;
-  transform:translateY(0);
+@keyframes card-in {
+  from {
+    opacity:0;
+    transform:translateY(8px);
+  }
+  to {
+    opacity:1;
+    transform:translateY(0);
+  }
 }
 
 .lab-card:nth-child(1) {
@@ -772,16 +773,16 @@ to {
     added_in: 'v0.8.0'
   },
   {
-    id: 'ohttp_decoy',
-    name: 'OHTTP Decoy Relay (Legacy)',
-    description: '[Superseded by OHTTP Full in v0.10.0] Routes privacy-noise requests through Oblivious HTTP relays. Decoy-only — response decapsulation not implemented in this variant. Enable OHTTP Full (v0.10.0) for complete RFC 9458 support.',
+    id: 'fingerprint_norm',
+    name: 'Fingerprint Normalisation',
+    description: 'Overrides hardwareConcurrency, deviceMemory, WebGL vendor/renderer, AudioContext sample-rate, and Canvas toDataURL with the statistical mode for desktop hardware. Every Diatom instance presents an identical fingerprint surface, making individual identification impractical. All override values are static constants — no randomness, no per-session drift.',
     category: 'Privacy',
-    stability: 'alpha',
-    risk: 'medium',
-    risk_note: 'Superseded by ohttp_full lab in v0.10.0. Kept for rollback compatibility.',
-    enabled: false,
+    stability: 'stable',
+    risk: 'low',
+    risk_note: 'Canvas perturbation is deterministic per-domain (hostname-keyed seed). Sites that rely on hardwareConcurrency for thread-pool sizing may behave differently.',
+    enabled: true,
     restart_required: false,
-    added_in: 'v0.8.0'
+    added_in: 'v0.16.0'
   },
   {
     id: 'zkp_age_gate',
@@ -831,18 +832,16 @@ to {
     restart_required: false,
     added_in: 'v0.8.0'
   },
-  {
-    { id: 'tos_auditor',
-    name: 'ToS Red-Flag Auditor'
-  },
+    {
+  id: 'tos_auditor',
+    name: 'ToS Red-Flag Auditor',
   description: 'Automatically extracts and analyses privacy policies on registration pages. Flags dangerous clauses: AI training consent, data sharing, perpetual IP licences, binding arbitration. Keyboard shortcut ⌘⇧T audits any page. Entirely local — no cloud processing.',
   category: 'Privacy', stability: 'stable', risk: 'low',
   risk_note: 'Analysis is heuristic-based. Always read the full policy for legal matters.',
   enabled: true, restart_required: false, added_in: 'v0.9.8' },
-  {
-    { id: 'shadow_index',
-    name: 'Shadow Index — Human-Curated Search'
-  },
+    {
+  id: 'shadow_index',
+    name: 'Shadow Index — Human-Curated Search',
   description: 'Full-text TF-IDF search over your Museum archive. Open with ⌘⇧F. Results ranked by personal curation quality, not SEO. Bias Contrast View groups results by estimated political lean to surface opposing perspectives. Freeze any page with ⌘⇧S.',
   category: 'Discovery', stability: 'beta', risk: 'low',
   risk_note: 'Local mode is fully offline. P2P mode (future) will broadcast anonymised keyword hashes only.',
@@ -860,59 +859,52 @@ to {
     added_in: 'v0.9.0'
   },
   // ── v0.10.0 Labs ──────────────────────────────────────────────────────────
-  {
-    { id: 'noise_p2p_sync',
+    {
+  id: 'noise_p2p_sync',
     name: 'Noise P2P Museum Sync',
-    description: 'Enables fully-functional peer-to-peer Museum synchronisation over Noise_XX encrypted channels. Replaces the previous WebRTC stub — actual data now transfers between peers with mutual authentication and forward secrecy. No relay server.'
-  },
+    description: 'Enables fully-functional peer-to-peer Museum synchronisation over Noise_XX encrypted channels. Replaces the previous WebRTC stub — actual data now transfers between peers with mutual authentication and forward secrecy. No relay server.',
   category: 'Sync', stability: 'beta', risk: 'low',
   risk_note: 'Requires both devices to be on the same network or have WAN connectivity. TOFU fingerprint verification shown on first connect.',
   enabled: false, restart_required: false, added_in: 'v0.10.0' },
-  {
-    { id: 'pir_blocklist',
+    {
+  id: 'pir_blocklist',
     name: 'PIR Blocklist Fetch',
-    description: 'Fetches filter list updates using Private Information Retrieval cover-traffic: each real download is accompanied by 2 decoy fetches from the catalogue, so the server cannot determine which blocklist Diatom actually uses.'
-  },
+    description: 'Fetches filter list updates using Private Information Retrieval cover-traffic: each real download is accompanied by 2 decoy fetches from the catalogue, so the server cannot determine which blocklist Diatom actually uses.',
   category: 'Privacy', stability: 'beta', risk: 'low',
   risk_note: 'Uses 3× bandwidth for filter list updates (typically < 100 KB/week total). Decoy responses are discarded.',
   enabled: false, restart_required: false, added_in: 'v0.10.0' },
-  {
-    { id: 'ohttp_full',
+    {
+  id: 'ohttp_full',
     name: 'Oblivious HTTP (Full)',
-    description: 'Upgrades OHTTP from decoy-only to a complete RFC 9458 implementation with response decapsulation. All outbound privacy-noise requests, blocklist fetches, and RSS updates are routed through an OHTTP relay — origin servers see the relay IP, not yours.'
-  },
+    description: 'Upgrades OHTTP from decoy-only to a complete RFC 9458 implementation with response decapsulation. All outbound privacy-noise requests, blocklist fetches, and RSS updates are routed through an OHTTP relay — origin servers see the relay IP, not yours.',
   category: 'Privacy', stability: 'beta', risk: 'medium',
   risk_note: 'Adds ~50–200ms latency per relayed request. Relay (Fastly or Brave) sees your IP and the target server name, but not request content.',
   enabled: false, restart_required: false, added_in: 'v0.10.0' },
-  {
-    { id: 'plugin_sandbox',
+    {
+  id: 'plugin_sandbox',
     name: 'Wasm Plugin Sandbox',
-    description: 'Enables the Wasm Component Model plugin system. Install third-party .wasm plugins from any source — each runs in an isolated sandbox with 16 MB memory, 100ms CPU budget, and zero network or filesystem access.'
-  },
+    description: 'Enables the Wasm Component Model plugin system. Install third-party .wasm plugins from any source — each runs in an isolated sandbox with 16 MB memory, 100ms CPU budget, and zero network or filesystem access.',
   category: 'Interface', stability: 'alpha', risk: 'low',
   risk_note: 'Plugins are sandboxed and cannot exfiltrate data. Requires the plugin-sandbox Cargo feature. Binary size increases by ~4 MB when feature is active.',
   enabled: false, restart_required: true, added_in: 'v0.10.0' },
-  {
-    { id: 'power_budget',
+    {
+  id: 'power_budget',
     name: 'Adaptive Power Scheduling',
-    description: 'Reduces background task frequency on battery: Sentinel slows from 1h to 3h intervals, tab-budget from 1min to 5min, and decoy cover traffic is disabled when battery is low (≤20%). All normal browsing is unaffected.'
-  },
+    description: 'Reduces background task frequency on battery: Sentinel slows from 1h to 3h intervals, tab-budget from 1min to 5min, and decoy cover traffic is disabled when battery is low (≤20%). All normal browsing is unaffected.',
   category: 'Performance', stability: 'stable', risk: 'low',
   risk_note: 'None. Background tasks only. Browsing performance is unchanged.',
   enabled: true, restart_required: false, added_in: 'v0.11.0' },
-  {
-    { id: 'etag_cache',
+    {
+  id: 'etag_cache',
     name: 'Conditional Filter List Fetch',
-    description: 'Sends ETag/If-None-Match on blocklist updates. If the list has not changed since last download, the server sends 304 Not Modified — no data transferred. Saves ~1 MB/week on EasyList + EasyPrivacy.'
-  },
+    description: 'Sends ETag/If-None-Match on blocklist updates. If the list has not changed since last download, the server sends 304 Not Modified — no data transferred. Saves ~1 MB/week on EasyList + EasyPrivacy.',
   category: 'Performance', stability: 'stable', risk: 'low',
   risk_note: 'None. Standard HTTP caching behaviour.',
   enabled: true, restart_required: false, added_in: 'v0.11.0' },
-  {
-    { id: 'ipc_batch',
+    {
+  id: 'ipc_batch',
     name: 'IPC Call Batching',
-    description: 'Coalesces high-frequency IPC calls (reading events, noise seed) within a single animation frame. Cuts IPC round-trips by ~60% during active scrolling, reducing CPU usage and improving scroll smoothness.'
-  },
+    description: 'Coalesces high-frequency IPC calls (reading events, noise seed) within a single animation frame. Cuts IPC round-trips by ~60% during active scrolling, reducing CPU usage and improving scroll smoothness.',
   category: 'Performance', stability: 'beta', risk: 'low',
   risk_note: 'None. Batched calls deliver the same data with lower frequency.',
   enabled: true, restart_required: false, added_in: 'v0.11.0' },

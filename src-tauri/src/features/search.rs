@@ -28,7 +28,6 @@ pub struct SearchEngine {
     pub description: &'static str,
 }
 
-
 pub fn builtin_engines() -> Vec<SearchEngine> {
     vec![
         SearchEngine {
@@ -78,7 +77,6 @@ pub fn builtin_engines() -> Vec<SearchEngine> {
         },
     ]
 }
-
 
 /// Get the currently selected default search engine ID from the DB.
 pub fn get_default(db: &crate::storage::db::Db) -> String {
@@ -149,7 +147,7 @@ pub fn build_suggest_url(engine: &SearchEngine, query: &str) -> Option<String> {
 
 /// Percent-encode a query string for safe URL embedding.
 ///
-/// [FIX-B04] The previous implementation used `c as u32` to compute the
+
 /// percent-escape value for non-ASCII characters. This emits a single `%XX`
 /// for the Unicode code point, which is incorrect for multi-byte characters.
 /// For example, 'ñ' (U+00F1) was encoded as `%F1` instead of the correct

@@ -2,7 +2,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
     pub museum_id: String,
@@ -99,14 +98,12 @@ fn tokenize(text: &str) -> Vec<String> {
         .collect()
 }
 
-
 /// Generate an anonymous keyword hash for P2P queries (prevents cross-query correlation).
 pub fn anonymize_keyword(keyword: &str, session_salt: &[u8; 32]) -> String {
     let mut input = session_salt.to_vec();
     input.extend_from_slice(keyword.to_lowercase().as_bytes());
     hex::encode(blake3::hash(&input).as_bytes())
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BiasContrastResult {

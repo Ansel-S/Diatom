@@ -21,7 +21,6 @@ pub enum HiddenNetwork {
     I2p,
 }
 
-
 static KNOWN_MIRRORS: &[(&str, &str, HiddenNetwork, &str)] = &[
     (
         "nytimes.com",
@@ -97,7 +96,6 @@ static KNOWN_MIRRORS: &[(&str, &str, HiddenNetwork, &str)] = &[
     ),
 ];
 
-
 /// Look up whether the given hostname has a known hidden-service mirror.
 /// Returns `None` if no mirror is catalogued for this domain.
 ///
@@ -118,7 +116,6 @@ pub fn lookup(host: &str) -> Option<OnionSuggestion> {
     }
     None
 }
-
 
 /// Called by the JS navigation hook when the user loads a new URL.
 /// Returns a suggestion if a hidden-service mirror is available.

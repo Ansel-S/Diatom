@@ -659,4 +659,3 @@ export function registerPaletteHotkey() {
     }
   }, { capture: true });
 }
-

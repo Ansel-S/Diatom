@@ -8,11 +8,9 @@ pub mod ghostpipe;
 pub mod compat;
 pub mod plugins;
 pub mod url_stripper;
-pub mod wasm_sandbox;
 
 // Convenience re-exports used by state.rs and commands.rs
-pub use bandwidth::BandwidthLimiter;
-pub use bandwidth::BandwidthRule;
+pub use bandwidth::{BandwidthLimiter, BandwidthRule};
 pub use monitor::NetMonitor;
 pub use ghostpipe::GhostPipeConfig;
 pub use compat::CompatStore;

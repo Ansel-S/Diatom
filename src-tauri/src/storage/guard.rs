@@ -2,13 +2,11 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-
 /// Pages accessed within this many days stay in the HOT tier (full FTS5).
 pub const HOT_WINDOW_DAYS: i64 = 89;
 
 /// Number of top TF-IDF keywords to retain in the cold-tier fingerprint.
 pub const COLD_KEYWORD_COUNT: usize = 20;
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageBudget {
@@ -29,13 +27,35 @@ impl Default for StorageBudget {
         StorageBudget {
             museum_budget_mb: 2_048,
             kpack_budget_mb:  4_096,
-            index_budget_mb:  50,       // ← primary new field
+            index_budget_mb:  50,
             warn_at_pct:      80,
             hard_cap_enabled: false,
         }
     }
 }
 
+impl StorageBudget {
+    /// Load user-configured budget values from the database, falling back to
+    /// compiled-in defaults for any key that is absent or unparseable.
+    ///
+    /// Centralised here so all callers (storage commands + state init) read the
+    /// same logic rather than duplicating the parse-or-default pattern.
+    pub fn load_from_db(db: &crate::storage::db::Db) -> Self {
+        let d     = Self::default();
+        let parse = |key: &str, fallback: u32| -> u32 {
+            db.get_setting(key).and_then(|s| s.parse().ok()).unwrap_or(fallback)
+        };
+        StorageBudget {
+            museum_budget_mb: parse("museum_budget_mb", d.museum_budget_mb as u32) as u64,
+            kpack_budget_mb:  parse("kpack_budget_mb",  d.kpack_budget_mb  as u32) as u64,
+            index_budget_mb:  parse("index_budget_mb",  d.index_budget_mb  as u32) as u64,
+            warn_at_pct:      parse("storage_warn_pct", d.warn_at_pct      as u32) as u8,
+            hard_cap_enabled: db.get_setting("storage_hard_cap")
+                .map(|v| v == "true")
+                .unwrap_or(d.hard_cap_enabled),
+        }
+    }
+}
 
 /// Which indexing tier a Museum entry currently occupies.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -47,7 +67,6 @@ pub enum IndexTier {
     /// The encrypted bundle still exists; Deep Dig can scan it on demand.
     Cold,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageReport {
@@ -153,7 +172,6 @@ pub fn report(db: &crate::storage::db::Db, budget: &StorageBudget) -> StorageRep
     }
 }
 
-
 /// Delete oldest bundles by frozen_at until under target_pct of the bundle budget.
 /// Returns (bundles_deleted, bytes_freed).
 pub fn evict_lru(
@@ -198,7 +216,6 @@ pub fn evict_lru(
 
     Ok((deleted, freed))
 }
-
 
 /// Degrade the FTS5 full-text index of cold-eligible entries until the index
 /// is under the budget.  "Cold-eligible" = last_accessed_at older than
@@ -269,7 +286,6 @@ pub fn degrade_cold_indexes(
 
     Ok(degraded)
 }
-
 
 /// Decide which tier a newly frozen page should start in.
 /// Pages frozen for the first time always start HOT.

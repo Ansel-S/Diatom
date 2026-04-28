@@ -23,6 +23,11 @@ pub struct PrivacyConfig {
     pub peripheral_block: bool,
     /// Suppress SharedArrayBuffer (timing oracle for Spectre).
     pub sab_block: bool,
+
+    /// the field was missing from the struct, causing a compile error.
+    /// When true, forces CandleWasm backend regardless of Ollama availability.
+    #[serde(default)]
+    pub extreme_mode: bool,
 }
 
 impl Default for PrivacyConfig {
@@ -38,6 +43,7 @@ impl Default for PrivacyConfig {
             screen_normalize: true,
             peripheral_block: true,
             sab_block: false, // Needed by some WASM apps
+            extreme_mode: false,
         }
     }
 }
@@ -123,7 +129,6 @@ impl PrivacyConfig {
         lines.join("\n")
     }
 }
-
 
 impl PrivacyConfig {
     /// Generate the JS snippet that installs the `diatom.debugPrivacy()` console API.

@@ -149,7 +149,6 @@ impl FingerprintNorm {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

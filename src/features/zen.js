@@ -208,4 +208,3 @@ function broadcastToSW() {
   bc.postMessage({ type: 'ZEN', active: _zenActive });
   bc.close();
 }
-

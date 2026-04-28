@@ -2,7 +2,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-
 pub const DOH_ENDPOINTS: &[(&str, &str)] = &[
     ("Cloudflare", "https://cloudflare-dns.com/dns-query"),
     ("Google",     "https://dns.google/dns-query"),
@@ -35,7 +34,6 @@ impl Default for GhostPipeConfig {
         }
     }
 }
-
 
 /// Resolves a hostname via DoH (returns the first resolved IP address).
 /// in DNS Diatom outboundrequest Resolve
@@ -75,7 +73,6 @@ struct DohRecord {
     data: String,
 }
 
-
 /// Checks whether a request URL matches configured tunnel patterns; routes via DoH if so.
 /// to prevent a DNS queries
 pub async fn resolve_fragmented(domain: &str, endpoints: &[String]) -> Result<Vec<std::net::IpAddr>> {
@@ -93,7 +90,6 @@ pub async fn resolve_fragmented(domain: &str, endpoints: &[String]) -> Result<Ve
 
     Ok(result)
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GhostPipeStatus {

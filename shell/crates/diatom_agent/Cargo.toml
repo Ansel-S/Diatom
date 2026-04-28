@@ -1,0 +1,14 @@
+[package]
+name        = "diatom_agent"
+version     = "0.1.0"
+edition     = "2021"
+description = "Micro-agent state machine for Diatom — planning layer + JSON tool dispatch"
+
+[dependencies]
+diatom_bridge = { path = "../diatom_bridge" }
+anyhow        = "1"
+serde         = { version = "1", features = ["derive"] }
+serde_json    = "1"
+tokio         = { version = "1", features = ["sync", "time", "rt", "macros"] }
+futures       = "0.3"
+log           = "0.4"

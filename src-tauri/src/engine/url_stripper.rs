@@ -110,7 +110,6 @@ static STRIP_PREFIXES: &[&str] = &[
     "iterable",
 ];
 
-
 /// Strip known tracking parameters from a URL string.
 /// Returns the cleaned URL. If parsing fails, the original string is returned.
 pub fn strip(raw_url: &str) -> Cow<str> {
@@ -156,7 +155,6 @@ fn should_strip(name: &str) -> bool {
 
     false
 }
-
 
 #[cfg(test)]
 mod tests {

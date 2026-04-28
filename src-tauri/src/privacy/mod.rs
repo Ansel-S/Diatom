@@ -1,4 +1,3 @@
-// diatom/src-tauri/src/privacy — v0.14.3
 // Fingerprint resistance, anonymity, and threat detection.
 pub mod config;
 pub mod fingerprint_norm;

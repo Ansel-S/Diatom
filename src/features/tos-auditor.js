@@ -143,7 +143,6 @@ function formatCategory(cat) {
   return map[cat] || '📌 ' + cat;
 }
 
-
 function buildPanel(result) {
   const { flags, risk_score, summary, url, text_length } = result;
   const noFlags = flags.length === 0;
@@ -415,7 +414,6 @@ function showPanel(result) {
 
 let _auditInProgress = false;
 
-async // [v0.6.0 OPT-01] CSS loaded on first audit run, not at boot
 function _ensureTosStyles() {
   if (typeof loadStylesheet === 'function') {
     loadStylesheet('/tos-auditor.css');
@@ -507,4 +505,3 @@ export const tosAuditor = {
 };
 
 window.__diatom_tos_auditor = tosAuditor;
-

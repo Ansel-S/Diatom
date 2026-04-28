@@ -16,8 +16,7 @@ use std::{
 use zeroize::Zeroize;
 
 use crate::{
-    blocker::is_blocked,
-    db::{BundleRow, new_id, unix_now},
+    storage::db::{BundleRow, new_id, unix_now},
 };
 
 const EWBN_MAGIC: &[u8; 4] = b"EWBT";
@@ -58,7 +57,6 @@ const TRACKER_SCRIPT_DOMAINS: &[&str] = &[
     "moatads.com",
 ];
 
-
 pub struct FreezeBundle {
     pub bundle_row: BundleRow,
     pub bundle_path: PathBuf,
@@ -77,9 +75,11 @@ pub fn freeze_page(
 
     let compressed = gzip_compress(stripped.as_bytes())?;
 
-    let encrypted = derive_bundle_key_and_encrypt(master_key, &compressed)?;
-
+    // Mix the bundle ID into the per-bundle key derivation so every bundle
+    // gets a cryptographically distinct encryption key.
     let id = new_id();
+    let encrypted = derive_bundle_key_and_encrypt(master_key, &id, &compressed)?;
+
     let filename = format!("{id}.ewbn");
     let path = bundles_dir.join(&filename);
     write_ewbn(&path, &encrypted)?;
@@ -96,6 +96,8 @@ pub fn freeze_page(
         bundle_size: std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) as i64,
         frozen_at: unix_now(),
         workspace_id: workspace_id.to_owned(),
+        index_tier: "hot".to_owned(),
+        last_accessed_at: None,
     };
 
     Ok(FreezeBundle {
@@ -105,14 +107,17 @@ pub fn freeze_page(
 }
 
 /// Decrypt and return the stripped HTML for a frozen bundle.
-pub fn thaw_bundle(bundle_path: &Path, master_key: &[u8; 32]) -> Result<String> {
+///
+/// `bundle_id` must be the same ID that was passed to `freeze_page` when this
+/// bundle was created — it is mixed into the HKDF derivation so that each
+/// bundle has a cryptographically distinct encryption key.
+pub fn thaw_bundle(bundle_path: &Path, bundle_id: &str, master_key: &[u8; 32]) -> Result<String> {
     let raw = std::fs::read(bundle_path).context("read .ewbn")?;
     let ciphertext = parse_ewbn(&raw)?;
-    let compressed = derive_bundle_key_and_decrypt(master_key, ciphertext)?;
+    let compressed = derive_bundle_key_and_decrypt(master_key, bundle_id, ciphertext)?;
     let html = gzip_decompress(&compressed)?;
     Ok(html)
 }
-
 
 fn strip_trackers(html: &str) -> String {
     use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
@@ -199,12 +204,11 @@ fn strip_trackers(html: &str) -> String {
     output
 }
 
-
 /// Derive a per-bundle AES key, encrypt `plaintext`, then immediately zeroize
 /// the derived key. This ensures the 32-byte bundle key never outlives the
 /// encrypt call, even if the caller panics.
-fn derive_bundle_key_and_encrypt(master_key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>> {
-    let mut bundle_key = derive_bundle_key(master_key)?;
+fn derive_bundle_key_and_encrypt(master_key: &[u8; 32], bundle_id: &str, plaintext: &[u8]) -> Result<Vec<u8>> {
+    let mut bundle_key = derive_bundle_key(master_key, bundle_id)?;
     let result = aes_gcm_encrypt(&bundle_key, plaintext);
     bundle_key.zeroize();
     result
@@ -214,18 +218,30 @@ fn derive_bundle_key_and_encrypt(master_key: &[u8; 32], plaintext: &[u8]) -> Res
 /// the derived key.
 fn derive_bundle_key_and_decrypt(
     master_key: &[u8; 32],
+    bundle_id: &str,
     ciphertext: Vec<u8>,
 ) -> Result<zeroize::Zeroizing<Vec<u8>>> {
-    let mut bundle_key = derive_bundle_key(master_key)?;
+    let mut bundle_key = derive_bundle_key(master_key, bundle_id)?;
     let result = aes_gcm_decrypt(&bundle_key, ciphertext);
     bundle_key.zeroize();
     result
 }
 
-fn derive_bundle_key(master_key: &[u8; 32]) -> Result<[u8; 32]> {
+/// Derive a bundle-specific AES-256 key via HKDF-SHA256.
+///
+/// `bundle_id` is mixed into the HKDF `info` field so every bundle gets a
+/// cryptographically distinct key even though they all share the same master
+/// key. Without this, an attacker who recovers any bundle key can trivially
+/// derive all others — and differential ciphertext analysis becomes trivial
+/// on similarly-structured pages.
+fn derive_bundle_key(master_key: &[u8; 32], bundle_id: &str) -> Result<[u8; 32]> {
     let hk = Hkdf::<Sha256>::new(None, master_key);
     let mut key = [0u8; 32];
-    hk.expand(b"freeze-v7", &mut key)
+    // "freeze-v8:" prefix bumped from v7 to signal the added per-bundle salt.
+    // Old bundles encrypted under v7 (constant info) cannot be decrypted with
+    // this function — they require a one-time migration or re-freeze.
+    let info = format!("freeze-v8:{bundle_id}");
+    hk.expand(info.as_bytes(), &mut key)
         .map_err(|_| anyhow::anyhow!("HKDF expand failed"))?;
     Ok(key)
 }
@@ -269,12 +285,22 @@ fn gzip_compress(data: &[u8]) -> Result<Vec<u8>> {
 fn gzip_decompress(data: &[u8]) -> Result<String> {
     use flate2::read::GzDecoder;
     use std::io::Read;
+
+    // Hard ceiling on decompressed output. A crafted .ewbn with a legitimate
+    // ≤256 MB compressed payload could otherwise expand to many GB via a zip
+    // bomb, bypassing the parse_ewbn compressed-size check (zip bomb fix).
+    const MAX_DECOMPRESSED_BYTES: u64 = 512 * 1024 * 1024; // 512 MB
+
     let mut dec = GzDecoder::new(data);
     let mut s = String::new();
-    dec.read_to_string(&mut s).context("gzip decompress")?;
+    dec.take(MAX_DECOMPRESSED_BYTES + 1)
+        .read_to_string(&mut s)
+        .context("gzip decompress")?;
+    if s.len() as u64 > MAX_DECOMPRESSED_BYTES {
+        bail!("decompressed bundle HTML exceeds {} MB limit", MAX_DECOMPRESSED_BYTES / 1024 / 1024);
+    }
     Ok(s)
 }
-
 
 fn write_ewbn(path: &Path, payload: &[u8]) -> Result<()> {
     use std::io::BufWriter;
@@ -296,12 +322,19 @@ fn parse_ewbn(raw: &[u8]) -> Result<Vec<u8>> {
     }
     let _version = u32::from_le_bytes(raw[4..8].try_into().unwrap());
     let payload_len = u64::from_le_bytes(raw[8..16].try_into().unwrap()) as usize;
+
+    // Reject pathologically large payload_len before allocation — a tampered
+    // .ewbn could declare a 4 GB payload and cause an OOM before decryption.
+    const MAX_BUNDLE_BYTES: usize = 256 * 1024 * 1024; // 256 MB (compressed)
+    if payload_len > MAX_BUNDLE_BYTES {
+        bail!(".ewbn payload_len {} exceeds {} MB limit", payload_len, MAX_BUNDLE_BYTES / 1024 / 1024);
+    }
+
     if raw.len() < 16 + payload_len {
         bail!(".ewbn payload truncated");
     }
     Ok(raw[16..16 + payload_len].to_vec())
 }
-
 
 /// Retrieve or generate the app master key.
 ///
@@ -353,7 +386,6 @@ pub fn get_or_init_master_key(db: &crate::storage::db::Db) -> Result<[u8; 32]> {
     Ok(key)
 }
 
-
 #[cfg(target_os = "macos")]
 fn macos_keychain_read() -> Option<[u8; 32]> {
     use security_framework::passwords::get_generic_password;
@@ -375,7 +407,6 @@ fn macos_keychain_write(key: &[u8; 32]) -> bool {
     let _ = delete_generic_password("com.ansel-s.diatom", "com.ansel-s.diatom.masterkey");
     set_generic_password("com.ansel-s.diatom", "com.ansel-s.diatom.masterkey", key).is_ok()
 }
-
 
 #[cfg(target_os = "windows")]
 fn windows_dpapi_read(db: &crate::storage::db::Db) -> Option<[u8; 32]> {
@@ -434,9 +465,24 @@ mod tests {
     fn bundle_key_zeroize_roundtrip() {
         let master = [0xBEu8; 32];
         let plain = b"zeroize test payload";
-        let ct = derive_bundle_key_and_encrypt(&master, plain).unwrap();
-        let dec = derive_bundle_key_and_decrypt(&master, ct).unwrap();
+        let ct = derive_bundle_key_and_encrypt(&master, "test-bundle-id-001", plain).unwrap();
+        let dec = derive_bundle_key_and_decrypt(&master, "test-bundle-id-001", ct).unwrap();
         assert_eq!(dec, plain);
+    }
+
+    /// Two different bundle IDs must produce different ciphertexts
+    /// even with the same master key and same plaintext.
+    #[test]
+    fn distinct_bundle_ids_produce_distinct_keys() {
+        let master = [0xBEu8; 32];
+        let plain = b"same content";
+        let ct1 = derive_bundle_key_and_encrypt(&master, "bundle-aaa", plain).unwrap();
+        let ct2 = derive_bundle_key_and_encrypt(&master, "bundle-bbb", plain).unwrap();
+        // Keys differ → decrypting ct1 with bundle-bbb key must fail
+        assert!(derive_bundle_key_and_decrypt(&master, "bundle-bbb", ct1).is_err(),
+            "decrypting with wrong bundle_id must fail");
+        assert!(derive_bundle_key_and_decrypt(&master, "bundle-aaa", ct2).is_err(),
+            "decrypting with wrong bundle_id must fail");
     }
 
     #[test]
@@ -461,13 +507,23 @@ mod tests {
         let result = freeze_page(html, "https://example.com", "Test", "ws-0", &key, dir.path());
         assert!(result.is_ok());
         let bundle = result.unwrap();
-        let thawed = thaw_bundle(&bundle.bundle_path, &key).unwrap();
+        let bundle_id = bundle.bundle_row.id.clone();
+        let thawed = thaw_bundle(&bundle.bundle_path, &bundle_id, &key).unwrap();
         assert!(thawed.contains("test freeze"));
     }
 
-    /// [B-08 FIX] Compile-time hex codec sanity check.
-    /// Verifies that hex::encode → hex::decode is an identity operation,
-    /// ensuring future developers don't confuse the hex DB key with base64.
+    /// parse_ewbn must reject an oversized payload_len before allocation.
+    #[test]
+    fn parse_ewbn_rejects_oversized_payload() {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(b"EWBT");                              // magic
+        raw.extend_from_slice(&1u32.to_le_bytes());                  // version
+        raw.extend_from_slice(&(512u64 * 1024 * 1024).to_le_bytes()); // 512 MB — over limit
+        raw.extend_from_slice(&[0u8; 32]);                           // stub payload
+        assert!(parse_ewbn(&raw).is_err(), "must reject oversized payload_len");
+    }
+
+    /// Compile-time hex codec sanity check: hex::encode → hex::decode is identity.
     #[test]
     fn hex_codec_roundtrip() {
         let original = b"diatom-master-key-test-32-bytes!";
@@ -477,66 +533,3 @@ mod tests {
         assert_eq!(encoded.len(), 64);
     }
 }
-
-
-/// Temporal audit result
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TemporalAuditResult {
-    pub url: String,
-    pub has_snapshot: bool,
-    pub snapshot_frozen_at: Option<i64>,
-    pub snapshot_hash: Option<String>,
-    pub current_hash: Option<String>,
-    pub change_detected: bool,
-    pub change_ratio: Option<f32>,
-    pub verdict: Option<crate::museum_version::TamperVerdict>,
-    pub diff_preview: Option<String>,  // first 500 characters of diff preview
-}
-
-/// Generate the "Historical Truth" banner injection script
-pub fn tamper_alert_banner(url: &str, frozen_at: i64, change_ratio: f32, diff_preview: &str) -> String {
-    let date = chrono::DateTime::from_timestamp(frozen_at, 0)
-        .map(|dt| dt.format("%Y-%m-%d").to_string())
- .unwrap_or_else(|| " ".to_owned());
-    let pct = (change_ratio * 100.0) as u32;
-    let (color, icon) = if change_ratio > 0.20 {
-        ("#ef4444", "🚨")
-    } else {
-        ("#f59e0b", "⚠️")
-    };
-
-    let diff_escaped = diff_preview
-        .replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
-        .chars().take(300).collect::<String>();
-
-    format!(r#"
-(function() {{
-  if (document.getElementById('__diatom_temporal_audit')) return;
-  const banner = document.createElement('div');
-  banner.id = '__diatom_temporal_audit';
-  banner.style.cssText = `
-    position:fixed;top:0;left:0;right:0;z-index:2147483647;
-    background:#0f172a;border-bottom:2px solid {color};
-    color:#e2e8f0;font:13px/1.5 system-ui;padding:8px 16px;
-    display:flex;align-items:flex-start;gap:12px;
-  `;
-  banner.innerHTML = `
-    <span style="font-size:18px;flex-shrink:0">{icon}</span>
-    <div style="flex:1;min-width:0">
-      <strong style="color:{color}">Content Changed {pct}%</strong>
- — This page differs from the Diatom Museum snapshot saved on {date}.
-      <details style="margin-top:4px">
-        <summary style="cursor:pointer;color:#94a3b8;font-size:11px">View diff preview</summary>
-        <pre style="margin:4px 0 0;font-size:10px;color:#94a3b8;white-space:pre-wrap;max-height:120px;overflow-y:auto">{diff_escaped}</pre>
-      </details>
-    </div>
-    <button onclick="document.getElementById('__diatom_temporal_audit').remove()"
-      style="background:none;border:none;color:#64748b;cursor:pointer;font-size:18px;flex-shrink:0">✕</button>
-  `;
-  document.documentElement.prepend(banner);
-}})();
-"#,
-        color=color, icon=icon, pct=pct, date=date, diff_escaped=diff_escaped
-    )
-}
-

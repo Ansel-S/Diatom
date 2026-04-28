@@ -17,7 +17,6 @@ use crate::{
     features::rss::RssStore,
     features::zen::ZenConfig,
     features::sentinel::SentinelCache,
-    features::localfiles::LocalFileBridge,
 };
 use anyhow::Result;
 use std::{
@@ -49,11 +48,10 @@ pub struct AppState {
     pub master_key:   Mutex<[u8; 32]>,
     pub noise_seed:   Mutex<u64>,
 
-    pub tabs:         Mutex<TabStore>,
+    pub tabs:           Mutex<TabStore>,
     pub tab_budget_cfg: Mutex<TabBudgetConfig>,
-    pub tab_proxy:    TabProxyRegistry,
-    pub compat:       Mutex<CompatStore>,
-    pub screen_width_px: Mutex<u32>,
+    pub tab_proxy:      TabProxyRegistry,
+    pub compat:         Mutex<CompatStore>,
 
     pub trust:        Mutex<TrustStore>,
     pub totp:         Mutex<TotpStore>,
@@ -62,7 +60,6 @@ pub struct AppState {
     pub zen:          Mutex<ZenConfig>,
 
     pub net_monitor:      Arc<NetMonitor>,
-    pub local_file_bridge: Arc<LocalFileBridge>,
     pub bandwidth_limiter: BandwidthLimiter,
 
     /// Live dynamic blocker — hot-reloaded when filter lists are fetched.
@@ -81,6 +78,13 @@ pub struct AppState {
 
     pub shutdown_token:     CancellationToken,
     pub window_ready_token: CancellationToken,
+
+    /// One-shot token used to authenticate the DevPanel bridge connection.
+    /// Generated at startup via `diatom_bridge::protocol::generate_auth_token()`.
+    /// Passed to `diatom-devpanel` via `--auth-token` and verified during the
+    /// `HandshakeMessage` exchange. Stored here so `BridgeClient::connect` can
+    /// access it after the DevPanel process is spawned.
+    pub devpanel_auth_token: String,
 
     pub platform: &'static str,
 }
@@ -113,8 +117,9 @@ impl AppState {
             }
         }
 
-        let storage_budget = db.get_setting("storage_budget")
-            .and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
+        // Use the canonical load method on StorageBudget so the parse-or-default
+        // logic is never duplicated across callers.
+        let storage_budget = crate::storage::guard::StorageBudget::load_from_db(&db);
 
         let tab_budget_cfg = db.get_setting("tab_budget_config")
             .and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
@@ -147,14 +152,12 @@ impl AppState {
             tabs: Mutex::new(TabStore::default()),
             tab_budget_cfg: Mutex::new(tab_budget_cfg),
             tab_proxy: TabProxyRegistry::new(),
-            compat: Mutex::new(compat_store),
-            screen_width_px: Mutex::new(1440),
-            trust: Mutex::new(trust),
+            compat:    Mutex::new(compat_store),
+            trust:     Mutex::new(trust),
             totp: Mutex::new(totp),
             rss: Mutex::new(rss),
             zen: Mutex::new(zen),
             net_monitor: Arc::new(NetMonitor::default()),
-            local_file_bridge: Arc::new(LocalFileBridge::default()),
             bandwidth_limiter,
             live_blocker: Arc::new(RwLock::new(None)),
             slm_cache: AsyncMutex::new(None),
@@ -165,10 +168,10 @@ impl AppState {
             power_budget: Mutex::new(initial_power),
             shutdown_token: CancellationToken::new(),
             window_ready_token: CancellationToken::new(),
+            devpanel_auth_token: diatom_bridge::protocol::generate_auth_token(),
             platform,
         })
     }
-
 
     pub fn workspace_id(&self) -> String {
         self.ws_id.lock().unwrap().clone()
@@ -200,7 +203,6 @@ impl AppState {
         self.data_dir.join("bundles")
     }
 
-
     /// Execute `f` with the master key. The Mutex is released before `f` runs,
     /// so slow crypto operations (AES, gzip) don't block other threads.
     pub fn with_master_key<F, R>(&self, f: F) -> R
@@ -209,12 +211,14 @@ impl AppState {
         f(&*key)
     }
 
-
-    /// Returns a live dynamic UA when Sentinel is fresh; falls back to the
+    /// Returns a live dynamic UA when Sentinel has data; falls back to the
     /// compiled-in platform constant otherwise.
+
+    /// (last_refresh==0 even when data was loaded from DB). Now gates on
+    /// has_data() so the first post-refresh UA is served immediately.
     pub fn current_ua(&self, prefer_safari: bool) -> String {
         let cache = self.sentinel.lock().unwrap();
-        if cache.is_fresh() {
+        if cache.has_data() {
             if let Some(ua) = crate::engine::blocker::dynamic_ua(
                 &cache, prefer_safari || self.platform == "macos")
             {
@@ -223,7 +227,6 @@ impl AppState {
         }
         crate::engine::blocker::platform_fallback_ua().to_owned()
     }
-
 
     /// Returns the JS initialisation script for fingerprint normalisation.
     /// Called once at startup; result is passed to Tauri's initialization_script.

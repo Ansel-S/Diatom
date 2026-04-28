@@ -3,7 +3,6 @@ use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SleepState {
@@ -14,7 +13,6 @@ pub enum SleepState {
     /// DOM serialised + LZ4 compressed in `zram` — minimal footprint.
     DeepSleep,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tab {
@@ -53,12 +51,19 @@ impl Tab {
         String::from_utf8(decompressed).ok()
     }
 
+    /// Wake from sleep: release compressed bytes, reset memory estimate.
+    pub fn wake(&mut self) {
+        self.zram  = None;   // Drop the Vec<u8> — returns memory to the allocator.
+        self.sleep = SleepState::Awake;
+        self.mem_weight = 150 * 1024 * 1024; // Reset to default estimate.
+        self.last_active = crate::storage::db::unix_now();
+    }
+
     /// Compressed size (bytes), or 0 if awake.
     pub fn zram_size(&self) -> usize {
         self.zram.as_ref().map(|z| z.len()).unwrap_or(0)
     }
 }
-
 
 #[derive(Default)]
 pub struct TabStore {
@@ -73,7 +78,21 @@ impl TabStore {
         self.tabs.insert(id.to_owned(), tab);
         self.order.push_front(id.to_owned());
         self.active = Some(id.to_owned());
-        self.tabs.get(id).unwrap()
+        // SAFETY: we just inserted `id` into `self.tabs` on the line above.
+        self.tabs.get(id).expect("tab must exist immediately after insertion")
+    }
+
+    /// Convenience wrapper for JS-initiated tab opens.
+    /// Generates a new ULid-style ID and uses the default workspace.
+    pub fn open(&mut self, url: String) -> String {
+        let id = crate::storage::db::new_id();
+        let ws = self.active
+            .as_ref()
+            .and_then(|a| self.tabs.get(a))
+            .map(|t| t.workspace_id.clone())
+            .unwrap_or_else(|| "default".to_owned());
+        self.create(&id, &ws, &url);
+        id
     }
 
     pub fn get(&self, id: &str) -> Option<&Tab> {
@@ -100,6 +119,51 @@ impl TabStore {
         self.order.push_front(id.to_owned());
         self.active = Some(id.to_owned());
         if let Some(tab) = self.tabs.get_mut(id) {
+            tab.last_active = crate::storage::db::unix_now();
+
+            // Without this, clicking a sleeping tab in the UI left it in
+            // ShallowSleep/DeepSleep state and the page never re-rendered.
+            if tab.sleep != SleepState::Awake {
+                tab.wake();
+            }
+        }
+    }
+
+    /// Wake a tab: restore it to Awake, release compressed ZRAM bytes,
+    /// and reset memory weight estimate to the default.
+    pub fn wake(&mut self, id: &str) {
+        if let Some(tab) = self.tabs.get_mut(id) {
+            tab.wake();
+        }
+    }
+
+    /// Return a JSON-serialisable snapshot of all tabs (LRU order).
+    pub fn list(&self) -> Vec<TabInfo> {
+        self.all_lru()
+            .into_iter()
+            .map(|t| TabInfo {
+                id:          t.id.clone(),
+                url:         t.url.clone(),
+                title:       t.title.clone(),
+                sleep:       t.sleep.clone(),
+                mem_weight:  t.mem_weight,
+                last_active: t.last_active,
+                zram_bytes:  t.zram_size(),
+            })
+            .collect()
+    }
+
+    /// Update URL + title after navigation; reset mem_weight estimate.
+    pub fn update(&mut self, id: &str, url: &str, title: &str, dwell_ms: Option<u64>) {
+        if let Some(tab) = self.tabs.get_mut(id) {
+            tab.url   = url.to_owned();
+            tab.title = title.to_owned();
+            // A dwell time ≥ 5 s means the user actually read this page;
+            // bump the weight slightly above the default to deprioritise it
+            // for LRU sleep (pages the user cares about stay awake longer).
+            if dwell_ms.unwrap_or(0) >= 5_000 {
+                tab.mem_weight = tab.mem_weight.max(200 * 1024 * 1024);
+            }
             tab.last_active = crate::storage::db::unix_now();
         }
     }
@@ -185,12 +249,12 @@ impl TabStore {
             .map(|t| t.mem_weight)
             .collect();
         if awake.is_empty() {
-            return 150 * 1024 * 1024; // [FIX-06] conservative default
+            return 150 * 1024 * 1024;
         }
+        // awake is guaranteed non-empty by the guard above.
         awake.iter().sum::<u64>() / awake.len() as u64
     }
 }
-
 
 #[derive(Serialize)]
 pub struct TabsState {
@@ -212,23 +276,10 @@ pub struct TabInfo {
 
 impl From<&TabStore> for TabsState {
     fn from(store: &TabStore) -> Self {
-        let tabs = store
-            .all_lru()
-            .into_iter()
-            .map(|t| TabInfo {
-                id: t.id.clone(),
-                url: t.url.clone(),
-                title: t.title.clone(),
-                sleep: t.sleep.clone(),
-                mem_weight: t.mem_weight,
-                last_active: t.last_active,
-                zram_bytes: t.zram_size(),
-            })
-            .collect();
         TabsState {
-            tabs,
+            tabs:      store.list(),
             active_id: store.active_id().map(|s| s.to_owned()),
-            count: store.count(),
+            count:     store.count(),
         }
     }
 }

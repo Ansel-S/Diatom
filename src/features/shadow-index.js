@@ -11,7 +11,6 @@ const FREEZE_KEY  = 's';         // ⌘⇧S to freeze current page
 const MAX_RESULTS = 20;
 const DEBOUNCE_MS = 280;
 
-const LEAN_DOMAINS_VERSION = '2025-Q1';
 const LEAN_DOMAINS = {
   left:        ['theguardian.com','huffpost.com','vox.com','msnbc.com','salon.com','thenation.com','democracynow.org'],
   centerleft:  ['nytimes.com','washingtonpost.com','theatlantic.com','slate.com'],
@@ -19,6 +18,8 @@ const LEAN_DOMAINS = {
   centerright: ['wsj.com','ft.com','economist.com','businessinsider.com','bloomberg.com'],
   right:       ['foxnews.com','breitbart.com','dailywire.com','nypost.com','washingtontimes.com','nationalreview.com'],
 };
+
+let _open      = false;
 
 function estimateLean(url) {
   try {
@@ -45,15 +46,12 @@ const QUALITY_CONFIG = {
   standard:      { icon: '○', label: 'Standard',       color: '#747490' },
 };
 
-
 function formatDate(ts) {
   if (!ts) return '';
   try {
     const d = new Date(ts * 1000);
     return d.toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' });
   } catch { return ''; }
-}
-
 }
 
 function highlight(text, query) {
@@ -90,21 +88,12 @@ let _searching = false;
 let _biasMode  = false;
 let _currentPageLean = 'unknown';
 
-const STYLES = null; // [v0.6.0 OPT-01] Extracted to /shadow-index.css — loaded on first open
-
 let _overlayEl = null;
 let _panelEl   = null;
 let _inputEl   = null;
 let _resultsEl = null;
 
 function createDOM() {
-  if (!document.getElementById('__diatom_si_styles')) {
-    const style = document.createElement('style');
-    style.id = '__diatom_si_styles';
-    style.textContent = STYLES;
-    document.head.appendChild(style);
-  }
-
   const overlay = document.createElement('div');
   overlay.id = OVERLAY_ID;
 
@@ -146,7 +135,6 @@ function createDOM() {
   `;
 
   overlay.appendChild(panel);
-  if (typeof loadStylesheet === 'function') loadStylesheet('/shadow-index.css');
   document.body.appendChild(overlay);
 
   _overlayEl = overlay;
@@ -584,4 +572,3 @@ export const shadowIndex = {
 };
 
 window.__diatom_shadow_index = shadowIndex;
-

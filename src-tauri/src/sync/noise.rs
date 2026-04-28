@@ -141,7 +141,6 @@ impl NoiseSession {
             .join(":")
     }
 
-
     /// Write one encrypted frame to a sync-Write.
     pub fn write_frame<W: Write>(&mut self, writer: &mut W, plaintext: &[u8]) -> Result<()> {
         let ct = self.encrypt(plaintext)?;
@@ -164,7 +163,6 @@ impl NoiseSession {
         self.decrypt(&ct)
     }
 }
-
 
 /// Derive a Noise keypair deterministically from the app master key.
 /// This makes the P2P identity stable across app restarts without storing

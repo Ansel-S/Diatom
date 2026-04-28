@@ -133,4 +133,3 @@ export function showSpeedBadge(speed) {
   badge.textContent = speed === 1 ? '' : `${speed.toFixed(2)}×`;
   badge.style.opacity = speed === 1 ? '0' : '1';
 }
-

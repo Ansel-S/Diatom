@@ -33,9 +33,8 @@ let _visionActive = false;
 export async function initHotkeys() {
   try {
     const raw = await invoke('cmd_setting_get', { key: 'hotkey_yield_domains' });
-    if (raw) {
-      JSON.parse(raw).forEach(d => _userYieldDomains.add(d));
-    }
+    if (raw) JSON.parse(raw).forEach(d => _userYieldDomains.add(d));
+  } catch { /* settings not yet populated */ }
 
   document.addEventListener('keydown', onKeyDown, { capture: true });
   document.addEventListener('keyup',   onKeyUp,   { capture: true });
@@ -129,4 +128,3 @@ export function registerDefaultHotkeys({ onFreeze, onZen, onVision, onNewTab, on
     _visionActive = true;
   }, { yieldInPartial: false });
 }
-

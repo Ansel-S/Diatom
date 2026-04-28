@@ -22,7 +22,6 @@ impl BandwidthRule {
     }
 }
 
-
 #[derive(Debug)]
 struct TokenBucket {
     /// Maximum bytes (bucket capacity).
@@ -66,7 +65,6 @@ impl TokenBucket {
         }
     }
 }
-
 
 /// Domains that are always exempt from bandwidth limiting.
 const DIATOM_INTERNAL_DOMAINS: &[&str] = &[

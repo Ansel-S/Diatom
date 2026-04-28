@@ -1,7 +1,6 @@
 
 use serde::{Deserialize, Serialize};
 
-
 /// Injected into the chrome WebView on startup.
 /// Each entry maps a CSS selector to an ARIA attribute set.
 #[derive(Debug, Serialize)]
@@ -45,7 +44,7 @@ pub const CHROME_ARIA_RULES: &[AriaRule] = &[
     AriaRule {
         selector: "#notes-zone",
         role: Some("region"),
-        label: Some("Draft and Echo notification zone"),
+        label: Some("Draft notification zone"),
         live: Some("polite"),
         expanded: None,
     },
@@ -54,13 +53,6 @@ pub const CHROME_ARIA_RULES: &[AriaRule] = &[
         role: Some("dialog"),
         label: Some("AI conversation panel"),
         live: Some("polite"),
-        expanded: None,
-    },
-    AriaRule {
-        selector: ".echo-panel",
-        role: Some("dialog"),
-        label: Some("Diatom Echo panel"),
-        live: None,
         expanded: None,
     },
     AriaRule {
@@ -143,7 +135,6 @@ pub fn generate_aria_injection_script() -> String {
     parts.join("\n")
 }
 
-
 /// Returns JS that enforces full keyboard navigation for Diatom chrome.
 /// Handles Tab-through-panels and Escape-to-close for all overlay panels.
 pub fn keyboard_nav_script() -> &'static str {
@@ -152,10 +143,10 @@ pub fn keyboard_nav_script() -> &'static str {
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
     const panel = document.querySelector(
-      '.echo-panel, .devnet-panel, .crusher-panel, #ai-panel, #zen-interstitial'
+      '.devnet-panel, .crusher-panel, #ai-panel, #zen-interstitial'
     );
     if (panel) {
-      const closeBtn = panel.querySelector('button[class*="close"], #crusher-close, #echo-close');
+      const closeBtn = panel.querySelector('button[class*="close"], #crusher-close');
       if (closeBtn) closeBtn.click();
     }
   }, { capture: true });

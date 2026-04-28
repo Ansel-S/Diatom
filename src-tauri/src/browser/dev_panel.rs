@@ -9,9 +9,9 @@ use std::{
     path::PathBuf,
     process::{Child, Command, Stdio},
 };
+use crate::state::AppState;
 use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::Mutex;
-
 
 /// Held in `tauri::State<DevPanelState>`.
 pub struct DevPanelState {
@@ -35,7 +35,6 @@ impl DevPanelState {
     }
 }
 
-
 /// Open (or focus) the DevPanel window.
 /// Called from JS: `invoke("dev_panel_open", { projectRoot })`
 
@@ -57,7 +56,15 @@ pub async fn dev_panel_open<R: Runtime>(
         return Ok(());
     }
 
-    let handle = spawn_devpanel(&app, project_root)
+    let auth_token = app
+        .try_state::<AppState>()
+        .map(|st| st.devpanel_auth_token.clone())
+        .unwrap_or_else(|| {
+            log::warn!("[dev-panel] AppState unavailable — generating ephemeral token");
+            diatom_bridge::protocol::generate_auth_token()
+        });
+
+    let handle = spawn_devpanel(&app, project_root, &auth_token)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -132,10 +139,10 @@ pub async fn dev_panel_navigate(
     .map_err(|e| e.to_string())
 }
 
-
 async fn spawn_devpanel<R: Runtime>(
-    app: &AppHandle<R>,
+    app:          &AppHandle<R>,
     project_root: Option<String>,
+    auth_token:   &str,
 ) -> Result<DevPanelHandle> {
     let pid  = std::process::id();
     let sock = socket_path(pid);
@@ -144,6 +151,12 @@ async fn spawn_devpanel<R: Runtime>(
     let child = Command::new(&bin)
         .arg("--diatom-pid")
         .arg(pid.to_string())
+        // Pass the auth token as a CLI argument so the DevPanel can validate
+        // the connecting backend (HandshakeMessage::Challenge/Response protocol).
+        // NOTE: this is visible in /proc/<pid>/cmdline to same-user processes.
+        // A 0600 tmpfile would be a stronger alternative for a future hardening pass.
+        .arg("--auth-token")
+        .arg(auth_token)
         .env("DIATOM_DEVPANEL", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -151,7 +164,7 @@ async fn spawn_devpanel<R: Runtime>(
         .spawn()
         .context("spawn diatom-devpanel")?;
 
-    let client = BridgeClient::connect(&sock, 20)
+    let client = BridgeClient::connect(&sock, auth_token, 20)
         .await
         .context("connect to DevPanel")?;
 
@@ -276,7 +289,6 @@ fn next_id() -> RequestId {
     static COUNTER: AtomicU64 = AtomicU64::new(1);
     COUNTER.fetch_add(1, Ordering::Relaxed)
 }
-
 
 /// Called from JS `window.__diatom_open_in_zed(url, line)`.
 ///

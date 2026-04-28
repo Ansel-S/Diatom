@@ -19,7 +19,6 @@ pub struct RenameResult {
     pub ai_generated: bool,
 }
 
-
 /// Request a filename suggestion from the local SLM.
 ///
 /// Sends a structured JSON prompt to cmd_slm_chat. The model is instructed to
@@ -84,7 +83,6 @@ pub async fn suggest_via_slm(ctx: &DownloadContext) -> Result<RenameResult> {
     Ok(RenameResult { suggested_name: safe, ai_generated: true })
 }
 
-
 /// Generate a deterministic slug from the page title when SLM is unavailable.
 ///
 /// Example: "TensorFlow 2.0 Release Notes — Google AI" → "tensorflow-2-0-release-notes.pdf"
@@ -105,7 +103,6 @@ pub fn suggest_from_title(ctx: &DownloadContext) -> RenameResult {
 
     RenameResult { suggested_name: name, ai_generated: false }
 }
-
 
 fn slugify(s: &str, max_len: usize) -> String {
     s.chars()

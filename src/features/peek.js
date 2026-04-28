@@ -180,4 +180,3 @@ if (!document.getElementById('__diatom_peek_css')) {
     style.textContent = PEEK_CSS;
     document.head.appendChild(style);
 }
-

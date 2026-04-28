@@ -7,7 +7,6 @@ import { domainOf } from './utils.js';
 let _jsErrors       = 0;
 let _consoleErrs    = 0;
 let _mutationCount  = 0;
-let _monitorUrl     = '';
 let _monitorTimer   = null;
 let _mutationObserver = null;
 
@@ -17,7 +16,6 @@ export function startHealthMonitor(url) {
   _jsErrors      = 0;
   _consoleErrs   = 0;
   _mutationCount = 0;
-  _monitorUrl    = url;
   clearTimeout(_monitorTimer);
 
   if (_mutationObserver) {
@@ -35,6 +33,7 @@ export function startHealthMonitor(url) {
     if (root) {
       _mutationObserver.observe(root, { childList: true, subtree: true, attributes: false });
     }
+  } catch { /* observation unavailable */ }
 
   _monitorTimer = setTimeout(() => checkPageHealth(url), 3000);
 }
@@ -57,24 +56,25 @@ async function checkPageHealth(url) {
     console_errors:     _consoleErrs,
   };
 
-  let isLegacy = false;
   try {
-    isLegacy = await invoke('cmd_compat_is_legacy', { domain });
+    const isLegacy = await invoke('cmd_compat_is_legacy', { domain });
 
-  const appearsBroken = blankBody
-    || _jsErrors >= 5
-    || (_jsErrors >= 2 && _consoleErrs >= 10);
+    const appearsBroken = blankBody
+      || _jsErrors >= 5
+      || (_jsErrors >= 2 && _consoleErrs >= 10);
 
-  if (isLegacy || appearsBroken) {
-    try {
-      await invoke('cmd_compat_page_report', { report });
-
-    injectCompatBanner(domain);
-  }
+    if (isLegacy || appearsBroken) {
+      try {
+        await invoke('cmd_compat_page_report', { report });
+      } catch { /* non-critical */ }
+      injectCompatBanner(domain);
+    }
+  } catch { /* non-critical */ }
 
   try {
     const isPayment = await invoke('cmd_compat_is_payment', { domain });
     if (isPayment) injectPaymentWarning(domain);
+  } catch { /* non-critical */ }
 }
 
 let _bannerShown = false;
@@ -169,7 +169,6 @@ export async function handoffToSystemBrowser(url) {
 }
 
 window.__diatom_handoff = handoffToSystemBrowser;
-window.__diatom_compat_handoff = handoffToSystemBrowser;
 
 export async function addCurrentDomainAsLegacy() {
   const domain = domainOf(location.href);
@@ -200,4 +199,3 @@ export function routeDiatomUrl(url) {
       return null;
   }
 }
-

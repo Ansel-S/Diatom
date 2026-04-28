@@ -1,7 +1,6 @@
 
 use anyhow::Result;
 
-
 /// Reason biometric/platform auth is unavailable. Sent to the frontend so it can
 /// display a context-appropriate message rather than silently pass or fail.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -73,7 +72,6 @@ pub async fn authenticate(reason: &str) -> Result<bool> {
     { linux_authenticate(reason).await }
 }
 
-
 #[cfg(target_os = "macos")]
 fn macos_biometric_available() -> bool {
     std::path::Path::new(
@@ -134,7 +132,6 @@ async fn macos_authenticate(reason: &str) -> Result<bool> {
     Ok(result)
 }
 
-
 #[cfg(target_os = "windows")]
 fn windows_hello_available() -> bool {
     std::path::Path::new(r"C:\Windows\System32\webauthn.dll").exists()
@@ -172,7 +169,6 @@ async fn windows_authenticate(reason: &str) -> Result<bool> {
     Ok(result)
 }
 
-
 /// Called by the frontend to request local authentication before a sensitive
 /// operation. Returns true if authenticated.
 /// Returns false (never silently allows) if unavailable or denied.
@@ -201,7 +197,6 @@ mod tests {
         let _ = is_biometric_available();
     }
 }
-
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn linux_biometric_available() -> bool {

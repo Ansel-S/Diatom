@@ -2,16 +2,30 @@
 <html lang="en">
 <head> <meta charset="UTF-8"> <meta name="viewport" content="width=device-width, initial-scale=1"> <title>About Diatom</title> <!-- P3 fix: load fonts locally — Inter, Playfair Display, DM Sans, DM Mono --> <link rel="stylesheet" href="../fonts.css"> <!-- P1 fix: dark-mode auto-detection (about.html is always dark, but keep consistent) -->
   <script>
-    (function () {
-      var stored = localStorage.getItem('diatom-theme');
+    // Theme is read from the Tauri backend (cmd_setting_get) rather than
+    // localStorage, because localStorage is cleared by some privacy tools and
+    // is not a reliable storage channel inside Diatom's webview context.
+    // On initial paint, fall back to the OS preference so there is no flash.
+    (async function () {
       var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      document.documentElement.setAttribute('data-theme', stored || (prefersDark ? 'dark' : 'light'));
-      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function (e) {
-        if (!localStorage.getItem('diatom-theme'))
+      document.documentElement.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
+      try {
+        var ipc = await import('../browser/ipc.js');
+        var stored = await ipc.invoke('cmd_setting_get', { key: 'theme' });
+        if (stored === 'dark' || stored === 'light')
+          document.documentElement.setAttribute('data-theme', stored);
+      } catch (_) { /* running outside Tauri — OS preference used */ }
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', async function (e) {
+        try {
+          var ipc2 = await import('../browser/ipc.js');
+          var s = await ipc2.invoke('cmd_setting_get', { key: 'theme' });
+          if (!s) document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+        } catch (_) {
           document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+        }
       });
     })();
-</script>
+  </script>
   <style>
 *,
 *::before,
@@ -233,23 +247,20 @@ hr {
         Diatom has no server. No account system. No telemetry.
         No anonymous data collection for "improving user experience".
         Your data stays on your device. If it leaves, that is your deliberate choice.
-      </div> </div> <div class="axiom"> <div class="axiom-num">2</div> <div class="axiom-body"> <strong>The Zen Mode 50-character gate is never removed.</strong>
+      </div> </div> <div class="axiom"> <div class="axiom-num">2</div> <div class="axiom-body"> <strong>The Zen Mode intent declaration is on by default and cannot be removed from defaults.</strong>
         Breaking focus has a cost. The cost is writing down why you are breaking it.
-        This is not a punishment — it is a ritual. Rituals make behaviour conscious.
+        This is a ritual, not a punishment. Users who have internalised the ritual
+        may disable the gate in Settings — this is an opt-out, not a bypass.
       </div> </div> <div class="axiom"> <div class="axiom-num">3</div> <div class="axiom-body"> <strong>No centralised sync server, ever.</strong>
         Even if that means cross-device sync requires physical proximity (Mesh P2P).
         The price of cloud convenience is that your data becomes the cloud's data.
       </div> </div> <div class="axiom"> <div class="axiom-num">4</div> <div class="axiom-body"> <strong>Ad-tracking systems do not deserve to be treated politely.</strong>
         Decoy traffic, fingerprint noise, Referer sanitisation — these are not activism,
         they are a systematic defence against a systematic violation.
-      </div> </div> <div class="axiom"> <div class="axiom-num">5</div> <div class="axiom-body"> <strong>The Echo tells you the truth, even when it is uncomfortable.</strong>
-        If you spent 80% of your time consuming fragmented content today, it will say so.
-        This is not judgement — it is a mirror. You are free to dislike what you see,
-        but Diatom will not smash the mirror on your behalf.
       </div> </div> <div class="axiom"> <div class="axiom-num">6</div> <div class="axiom-body"> <strong>Accessibility is an ethical floor, not a feature list item.</strong>
         Screen reader users should not lose access because we pursue minimalism.
         The cost of accessibility is borne by Diatom, not by the user.
-      </div> </div> </section> <hr> <section> <h2>Hard limits (enforced at code level)</h2> <table class="limits"> <thead> <tr><th>Constraint</th><th>Value</th><th>Class</th></tr> </thead> <tbody> <tr> <td>Binary size ceiling</td> <td>15 MB</td> <td><span class="badge badge-always">Hard limit</span></td> </tr> <tr> <td>10-tab memory target</td> <td>150 MB</td> <td><span class="badge badge-always">Target</span></td> </tr> <tr> <td>Cold-start time</td> <td>&lt; 80 ms</td> <td><span class="badge badge-always">Target</span></td> </tr> <tr> <td>Decoy request rate</td> <td>Max 1 req/8s/domain</td> <td><span class="badge badge-always">Code-enforced</span></td> </tr> <tr> <td>Centralised sync server</td> <td>Never</td> <td><span class="badge badge-never">Never</span></td> </tr> <tr> <td>Upload any user data to a Diatom server</td> <td>Never</td> <td><span class="badge badge-never">Never</span></td> </tr> <tr> <td>Send a real fingerprint to ad platforms</td> <td>Never</td> <td><span class="badge badge-never">Never</span></td> </tr> <tr> <td>Introduce a WebExtensions API compatibility layer</td> <td>Never</td> <td><span class="badge badge-never">Never</span></td> </tr> <tr> <td>Bundle a Blink/Chromium instance</td> <td>Never (exceeds size budget)</td> <td><span class="badge badge-never">Never</span></td> </tr> <tr> <td>Zen Mode skip button</td> <td>Never</td> <td><span class="badge badge-never">Never</span></td> </tr> </tbody> </table> </section> <hr> <section> <h2>Honest limitations</h2> <p>
+      </div> </div> </section> <hr> <section> <h2>Hard limits (enforced at code level)</h2> <table class="limits"> <thead> <tr><th>Constraint</th><th>Value</th><th>Class</th></tr> </thead> <tbody> <tr> <td>Binary size ceiling</td> <td>10 MB</td> <td><span class="badge badge-always">Hard limit</span></td> </tr> <tr> <td>10-tab memory target</td> <td>150 MB</td> <td><span class="badge badge-always">Target</span></td> </tr> <tr> <td>Cold-start time</td> <td>&lt; 80 ms</td> <td><span class="badge badge-always">Target</span></td> </tr> <tr> <td>Decoy request rate</td> <td>Max 1 req/8s/domain</td> <td><span class="badge badge-always">Code-enforced</span></td> </tr> <tr> <td>Centralised sync server</td> <td>Never</td> <td><span class="badge badge-never">Never</span></td> </tr> <tr> <td>Upload any user data to a Diatom server</td> <td>Never</td> <td><span class="badge badge-never">Never</span></td> </tr> <tr> <td>Send a real fingerprint to ad platforms</td> <td>Never</td> <td><span class="badge badge-never">Never</span></td> </tr> <tr> <td>Introduce a WebExtensions API compatibility layer</td> <td>Never</td> <td><span class="badge badge-never">Never</span></td> </tr> <tr> <td>Bundle a Blink/Chromium instance</td> <td>Never (exceeds size budget)</td> <td><span class="badge badge-never">Never</span></td> </tr> <tr> <td>Zen Mode intent gate (default on)</td> <td>Default cannot be removed; users may opt out</td> <td><span class="badge badge-never">Non-removable default</span></td> </tr> </tbody> </table> </section> <hr> <section> <h2>Honest limitations</h2> <p>
       Diatom cannot play 4K DRM video (Linux). It does not support bank hardware-key plugins,
       WebUSB, or WebMIDI. On some government sites and legacy enterprise systems,
       it will prompt you to open in the system browser.

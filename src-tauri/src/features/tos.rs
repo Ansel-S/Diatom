@@ -1,7 +1,6 @@
 
 use serde::{Deserialize, Serialize};
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TosFlag {
     pub severity: FlagSeverity,
@@ -43,7 +42,6 @@ pub struct TosAuditResult {
     pub audited_at: i64,
     pub text_length: usize,
 }
-
 
 struct TosRule {
     patterns: &'static [&'static str],
@@ -112,7 +110,6 @@ const TOS_RULES: &[TosRule] = &[
     },
 ];
 
-
 /// Analyse privacy policy / ToS text and return a list of red flags
 pub fn audit_tos(url: &str, text: &str) -> TosAuditResult {
     let text_lower = text.to_lowercase();
@@ -165,7 +162,6 @@ pub fn audit_tos(url: &str, text: &str) -> TosAuditResult {
         text_length: text.len(),
     }
 }
-
 
 /// Generate the anti-adblock JS injection script.
 /// Rewrites common detection logic so detectors believe ads have loaded normally.

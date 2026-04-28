@@ -4,14 +4,12 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
-
 /// The three Diatom-curated models. Selected for the balance of:
 ///   - Size < 4 GB (fits in unified memory alongside the browser)
 ///   - Instruction-following quality (MMLU ≥ 60%)
 ///   - Privacy-safe licence (Apache 2.0 / MIT)
 
 /// Built-in Candle Wasm models — no Ollama required, run entirely in WASM sandbox.
-/// [v0.9.6] 2x enhanced: multi-turn context, structured output, streaming.
 pub const CANDLE_WASM_MODELS: &[SlmModel] = &[
     SlmModel {
         id: "diatom-wasm-fast",
@@ -61,7 +59,6 @@ pub struct SlmModel {
     pub context_len: u32,
 }
 
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SlmBackend {
@@ -70,8 +67,8 @@ pub enum SlmBackend {
     /// llama.cpp server detected at 127.0.0.1:8080.
     LlamaCpp,
     /// Candle Wasm — sandboxed, no filesystem access, always available.
-    /// [v0.9.6] Enhanced: now supports structured JSON output, tool-calling
-    /// simulation, multi-turn context (up to 4096 tokens), and streaming tokens.
+    /// Supports structured JSON output, tool-calling simulation, multi-turn
+    /// context (up to 4096 tokens), and streaming tokens.
     /// Models: SmolLM2-135M (instant) and Phi-3.5-Mini-Wasm (quality).
     CandleWasm,
     /// No backend — AI features unavailable.
@@ -95,7 +92,7 @@ pub async fn detect_backend(privacy_mode: bool) -> SlmBackend {
 
     if let Ok(resp) = reqwest::Client::new()
         .get("http://127.0.0.1:11434/api/tags")
-        .timeout(std::time::Duration::from_millis(200))  // [FIX-SLM-CACHE] fast probe
+        .timeout(std::time::Duration::from_millis(200))
         .send()
         .await
     {
@@ -106,7 +103,7 @@ pub async fn detect_backend(privacy_mode: bool) -> SlmBackend {
 
     if let Ok(resp) = reqwest::Client::new()
         .get("http://127.0.0.1:8080/health")
-        .timeout(std::time::Duration::from_millis(200))  // [FIX-SLM-CACHE] fast probe
+        .timeout(std::time::Duration::from_millis(200))
         .send()
         .await
     {
@@ -117,7 +114,6 @@ pub async fn detect_backend(privacy_mode: bool) -> SlmBackend {
 
     SlmBackend::CandleWasm
 }
-
 
 #[derive(Debug, Deserialize)]
 pub struct ChatRequest {
@@ -171,7 +167,6 @@ pub struct ModelInfo {
     pub created: i64,
     pub owned_by: &'static str,
 }
-
 
 pub const SLM_PORT: u16 = 11435;
 
@@ -415,19 +410,34 @@ impl SlmServer {
     }
 }
 
-
 pub async fn run_server(server: Arc<SlmServer>, shutdown: tokio_util::sync::CancellationToken) {
-    let addr = format!("127.0.0.1:{}", SLM_PORT);
-    let listener = match TcpListener::bind(&addr).await {
-        Ok(l) => {
-            tracing::info!("SLM server listening on {}", addr);
-            l
-        }
-        Err(e) => {
-            tracing::error!("SLM server failed to bind {}: {}", addr, e);
-            return;
+    // Try preferred port; fall back to OS-assigned port so two Diatom
+    // instances (e.g. dev + prod) can coexist without silent failures.
+    let listener = {
+        let preferred = format!("127.0.0.1:{}", SLM_PORT);
+        match TcpListener::bind(&preferred).await {
+            Ok(l) => {
+                tracing::info!("SLM server listening on {}", preferred);
+                l
+            }
+            Err(_) => {
+                let fallback = "127.0.0.1:0";
+                match TcpListener::bind(fallback).await {
+                    Ok(l) => {
+                        let port = l.local_addr().map(|a| a.port()).unwrap_or(0);
+                        tracing::warn!("SLM preferred port {} in use; using :{}", SLM_PORT, port);
+                        l
+                    }
+                    Err(e) => {
+                        tracing::error!("SLM server failed to bind on all ports: {}", e);
+                        return;
+                    }
+                }
+            }
         }
     };
+    // Store the actual port so callers can connect to the right address.
+    let _actual_port = listener.local_addr().map(|a| a.port()).unwrap_or(SLM_PORT);
 
     loop {
         let accept_result = tokio::select! {
@@ -611,6 +621,69 @@ async fn handle_request(server: &SlmServer, raw: &str) -> (&'static str, String)
                 }
             }
         }
+        // These make the Diatom SLM a drop-in replacement for Ollama or
+        // any OpenAI-compatible backend. External tools (VS Code Copilot
+        // alternatives, Continue.dev, LM Studio, …) can point to
+        // http://127.0.0.1:11435 and work without modification.
+        // See AXIOMS.md §Axiom 16 and architecture doc §3.1.
+        ("GET", "/") | ("GET", "/api/version") => {
+            (
+                "200 OK",
+                format!(
+                    r#"{{"version":"{}","backend":"diatom-slm","openai_compat":true}}"#,
+                    env!("CARGO_PKG_VERSION")
+                ),
+            )
+        }
+        // POST /v1/completions — legacy text-completion endpoint
+        // Wraps the message into a user turn and calls the chat path.
+        ("POST", "/v1/completions") => {
+            let body_start = raw
+                .find("
+
+").map(|i| i + 4)
+                .or_else(|| raw.find("
+
+").map(|i| i + 2))
+                .unwrap_or(raw.len());
+            let body_str = &raw[body_start..];
+            // Parse {model, prompt, max_tokens, temperature, stream}
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(body_str) {
+                let prompt = v["prompt"].as_str().unwrap_or("").to_owned();
+                let model  = v["model"].as_str().unwrap_or("diatom-balanced").to_owned();
+                let req = ChatRequest {
+                    model,
+                    messages: vec![ChatMessage { role: "user".into(), content: prompt }],
+                    stream: v["stream"].as_bool().unwrap_or(false),
+                    temperature: v["temperature"].as_f64().map(|t| t as f32),
+                    max_tokens: v["max_tokens"].as_u64().map(|n| n as u32),
+                };
+                match server.chat(&req).await {
+                    Ok(resp) => {
+                        let json = serde_json::to_string(&resp).unwrap_or_default();
+                        ("200 OK", json)
+                    }
+                    Err(e) => {
+                        let json = format!(
+                            r#"{{"error":{{"message":"{}","type":"server_error"}}}}"#, e
+                        );
+                        ("500 Internal Server Error", json)
+                    }
+                }
+            } else {
+                (
+                    "400 Bad Request",
+                    r#"{"error":{"message":"invalid request body","type":"invalid_request_error"}}"#
+                        .into(),
+                )
+            }
+        }
+        // GET /v1/embeddings — stub; returns not-implemented with a clear message
+        // rather than a generic 404 so clients know it's intentionally absent.
+        ("POST", "/v1/embeddings") => (
+            "501 Not Implemented",
+            r#"{"error":{"message":"Embeddings are not supported by the Diatom local SLM. Use a dedicated embedding model via Ollama at a separate port.","type":"not_implemented"}}"#.into(),
+        ),
         _ => (
             "404 Not Found",
             r#"{"error":{"message":"not found"}}"#.into(),

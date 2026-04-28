@@ -25,8 +25,6 @@ export function diatomPagePath(url) {
         'diatom://newtab':     null,   // handled by #new-tab-page in index.html
         'diatom://settings':   '/src/ui/settings.html',
         'diatom://museum':     '/src/ui/museum.html',
-        'diatom://echo':       '/src/ui/echo.html',
-        'diatom://localfiles': '/src/ui/localfiles.html',
     };
     return routes[url.toLowerCase()] ?? null;
 }
@@ -138,3 +136,25 @@ export const session = {
     },
 };
 
+// ── Aliases & missing exports (referenced in tabs.js and main.js) ─────────────
+
+/** `qs` is the conventional shorthand for querySelector; alias of `q`. */
+export const qs = q;
+
+/** Resolve a raw user input to an absolute URL string. */
+export function resolveUrl(raw) {
+    const s = raw.trim();
+    if (!s) return 'about:blank';
+    if (s.startsWith('diatom://') || s.startsWith('about:')) return s;
+    try { return new URL(s).href; } catch { /* not an absolute URL */ }
+    if (/^[\w-]+\.[\w.-]+/.test(s)) return 'https://' + s;
+    return s;   // fall back; caller decides how to handle
+}
+
+/** Human-readable relative time string from a Unix timestamp (seconds). */
+export const timeAgo = relativeTime;
+
+/** Generate a random unique id string (hex, 8 chars). */
+export function uid() {
+    return Math.random().toString(16).slice(2, 10);
+}

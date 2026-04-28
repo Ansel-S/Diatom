@@ -1,8 +1,25 @@
+/* fonts.css — Diatom typeface tokens
+ *
+ * All stacks resolve to fonts already present on the host system.
+ * No external font files are fetched.
+ *
+ * Design note (v0.16.0): font choice is about *presentation*, not organisation.
+ * Article and RSS views no longer enforce a serif stack — they inherit --f-body
+ * so the reading surface matches the OS default.  Users who prefer a serif face
+ * can override via Page Boosts (diatom://labs → Page Boosts).
+ */
+
 :root {
-  --f-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Ubuntu, Cantarell, sans-serif;
-  --f-serif: "New York", "Iowan Old Style", Cambria, Georgia, "Times New Roman", serif;
-  --f-body: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Ubuntu, Cantarell, sans-serif;
-  --f-mono:
-    "SF Mono", "Cascadia Code", "Cascadia Mono", "Fira Code", "DejaVu Sans Mono", Menlo, Consolas,
-    monospace;
+  /* Interface text — the default face for all shell chrome. */
+  --f-sans: system-ui, -apple-system, sans-serif;
+
+  /* Retained for Page Boosts and explicit opt-in contexts.
+     Not applied automatically to any reading surface. */
+  --f-serif: ui-serif, Georgia, serif;
+
+  /* Code, addresses, and monospaced data. */
+  --f-mono: ui-monospace, "Cascadia Code", "Fira Code", Menlo, Consolas, monospace;
+
+  /* Prose bodies (article view, RSS reader) — inherits OS default, no forced stack. */
+  --f-body: inherit;
 }

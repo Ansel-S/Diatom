@@ -1,3 +1,4 @@
+use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 
@@ -43,9 +44,16 @@ macro_rules! lab {
     };
 }
 
+/// All built-in lab definitions. Allocated once at startup via `LazyLock`.
+pub static ALL_LABS: LazyLock<Vec<Lab>> = LazyLock::new(build_labs);
 
+/// Return a reference to the immutable built-in lab list.
+#[inline]
+pub fn all_labs() -> &'static [Lab] {
+    &ALL_LABS
+}
 
-pub fn all_labs() -> Vec<Lab> {
+fn build_labs() -> Vec<Lab> {
     vec![
         lab!("sentinel_ua", "Dynamic User-Agent (Sentinel)",
             "Automatically tracks the current stable Chrome and Safari versions \
@@ -61,11 +69,17 @@ pub fn all_labs() -> Vec<Lab> {
             "Privacy", Beta, Low,
             "Bundles encrypted with this flag cannot be decrypted by older Diatom versions.",
             false, false, "v0.8.0"),
-        lab!("ohttp_decoy", "OHTTP Decoy Relay",
-            "Routes privacy-noise requests through Oblivious HTTP relays.",
-            "Privacy", Alpha, Medium,
-            "Response decapsulation is not yet implemented — decoy requests only.",
-            false, false, "v0.8.0"),
+        lab!("fingerprint_norm", "Fingerprint Normalisation",
+            "Overrides hardware-concurrency, device-memory, WebGL vendor/renderer, \
+                          AudioContext sample-rate, and Canvas toDataURL with the statistical \
+                          mode for desktop hardware. Every Diatom instance presents an identical \
+                          fingerprint surface, making individual identification impractical. \
+                          All values are static constants — no randomness, no per-session drift.",
+            "Privacy", Stable, Low,
+            "Canvas perturbation is deterministic per-domain (hostname-keyed seed). \
+                        Sites that depend on hardware-concurrency for thread-pool sizing may \
+                        behave differently. No effect on audio playback quality.",
+            true, false, "v0.16.0"),
         lab!("zkp_age_gate", "Zero-Knowledge Age Verification",
             "Proves age threshold to participating sites without revealing birth year.",
             "Privacy", Alpha, High,
@@ -98,17 +112,6 @@ pub fn all_labs() -> Vec<Lab> {
             "AI", Beta, Low,
             "Page content is sent to the local model only — never to external servers.",
             false, false, "v0.9.0"),
-        lab!("dynamic_tab_budget", "Adaptive Tab Limit",
-            "Memory-aware tab limit using Resource-Aware Scaling, \
-                          Golden Ratio zones, and Screen Gravity.",
-            "Performance", Beta, Low,
-            "Budget recalculates every 60 seconds.",
-            true, false, "v0.9.0"),
-        lab!("golden_ratio_zones", "Golden Ratio Tab Zones",
-            "Focus zone (61.8%) vs Buffer zone (38.2%) tab scheduling.",
-            "Performance", Beta, Low,
-            "None. Cosmetic behavioural change only.",
-            true, false, "v0.9.0"),
         lab!("entropy_sleep", "Entropy-Reduction Sleep",
             "Shortens auto-sleep timer as tabs approach the budget limit.",
             "Performance", Stable, Low,
@@ -132,7 +135,7 @@ pub fn all_labs() -> Vec<Lab> {
             "Interface", Stable, Low,
             "None.",
             true, false, "v0.9.0"),
-        // [FIX-PASSKEY-01] Stability→Stable, risk→Low, enabled=true (well-tested in v0.9.x)
+
         lab!("webauthn_bridge", "WebAuthn / Passkey Bridge",
             "Bridges platform authenticators (Face ID, Touch ID, Windows Hello, \
                           YubiKey) to Diatom's credential manager. Passkeys are stored locally \
@@ -162,15 +165,6 @@ pub fn all_labs() -> Vec<Lab> {
             "Only accessible from localhost. Token expires on quit. \
                         Do not expose port 39012 through firewall rules.",
             false, true, "v0.9.8"),
-        lab!("local_file_bridge", "Local File Bridge (diatom://local/)",
-            "Allows specific web pages and Diatom built-in tools to directly read and \
-                          write local folders via the diatom://local/<alias>/ protocol. \
-                          Each mount point requires explicit user approval. \
-                          Breaks the browser sandbox in a controlled, audited way.",
-            "Developer", Beta, Medium,
-            "Only user-approved folders are accessible. System directories are blocked. \
-                        All access is logged in the Net Monitor. DEFAULT OFF — must be manually enabled.",
-            false, false, "v0.9.8"),
         lab!("ghostpipe", "GhostPipe (DNS-over-HTTPS Tunnel)",
             "Routes Diatom's own outgoing requests (filter list updates, Sentinel checks) \
                           through DNS-over-HTTPS endpoints, camouflaging them as standard DNS traffic. \
@@ -332,9 +326,8 @@ pub fn all_labs() -> Vec<Lab> {
     ]
 }
 
-
 pub fn load_labs(db: &crate::storage::db::Db) -> Vec<Lab> {
-    let mut labs = all_labs();
+    let mut labs = all_labs().to_vec();
     for lab in &mut labs {
         let key = format!("lab_{}", lab.id);
         if let Some(val) = db.get_setting(&key) {
@@ -345,16 +338,13 @@ pub fn load_labs(db: &crate::storage::db::Db) -> Vec<Lab> {
 }
 
 pub fn set_lab(db: &crate::storage::db::Db, id: &str, enabled: bool) -> anyhow::Result<bool> {
-    if !all_labs().iter().any(|l| l.id == id) {
-        anyhow::bail!("unknown lab id: {}", id);
-    }
+    let lab = all_labs()
+        .iter()
+        .find(|l| l.id == id)
+        .ok_or_else(|| anyhow::anyhow!("unknown lab id: {}", id))?;
     let key = format!("lab_{}", id);
     db.set_setting(&key, if enabled { "true" } else { "false" })?;
-    let restart = all_labs().iter()
-        .find(|l| l.id == id)
-        .map(|l| l.restart_required)
-        .unwrap_or(false);
-    Ok(restart)
+    Ok(lab.restart_required)
 }
 
 pub fn is_lab_enabled(db: &crate::storage::db::Db, id: &str) -> bool {
@@ -362,10 +352,145 @@ pub fn is_lab_enabled(db: &crate::storage::db::Db, id: &str) -> bool {
     db.get_setting(&key)
         .map(|v| v == "true")
         .unwrap_or_else(|| {
-            all_labs().iter()
+            all_labs()
+                .iter()
                 .find(|l| l.id == id)
                 .map(|l| l.enabled)
                 .unwrap_or(false)
         })
 }
 
+//
+// Every Lab feature exposes two local-only feedback signals:
+//   "useful"   — user found value in it
+//   "never_use" — user has not used it / wants it gone
+//
+// Neither signal is transmitted anywhere. "never_use" accumulates a local day
+// counter; when it exceeds RETIREMENT_THRESHOLD_DAYS the Lab is flagged as
+// a retirement candidate and the UI displays it in a collapsed "Consider
+// retiring" section with a link to the GitHub discussion.
+//
+// This mechanism exists entirely on-device. No analytics, no server, no voting.
+// The GitHub link is for community discussion, not data collection.
+
+/// Days of continuous "never_use" marks before a Lab enters the retirement queue.
+pub const RETIREMENT_THRESHOLD_DAYS: u64 = 60;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LabFeedback {
+    /// Whether the user has ever marked this lab "useful".
+    pub marked_useful:     bool,
+    /// Unix timestamp when the user first marked "never_use". 0 = never marked.
+    pub never_use_since:   u64,
+    /// True when the lab has been flagged as a retirement candidate.
+    pub retirement_candidate: bool,
+}
+
+impl LabFeedback {
+    /// Returns true if this lab has been "never_use" for long enough to show
+    /// the retirement suggestion in the UI.
+    pub fn is_retirement_candidate(&self) -> bool {
+        self.never_use_since > 0
+            && !self.marked_useful
+            && crate::storage::db::unix_now() as u64
+                >= self.never_use_since + RETIREMENT_THRESHOLD_DAYS * 86_400
+    }
+}
+
+fn feedback_key(lab_id: &str) -> String {
+    format!("lab_feedback_{}", lab_id)
+}
+
+/// Load persisted feedback for `lab_id`. Returns default if none stored.
+pub fn load_feedback(
+    db:     &crate::storage::db::Db,
+    lab_id: &str,
+) -> LabFeedback {
+    db.get_setting(&feedback_key(lab_id))
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// Record that the user found `lab_id` useful.
+///
+/// Clears any "never_use" counter — one "useful" signal resets the retirement
+/// clock entirely.
+pub fn mark_useful(
+    db:     &crate::storage::db::Db,
+    lab_id: &str,
+) -> anyhow::Result<()> {
+    if !all_labs().iter().any(|l| l.id == lab_id) {
+        anyhow::bail!("unknown lab id: {}", lab_id);
+    }
+    let mut fb = load_feedback(db, lab_id);
+    fb.marked_useful        = true;
+    fb.never_use_since      = 0;
+    fb.retirement_candidate = false;
+    let json = serde_json::to_string(&fb)?;
+    db.set_setting(&feedback_key(lab_id), &json)?;
+    Ok(())
+}
+
+pub fn mark_never_use(
+    db:     &crate::storage::db::Db,
+    lab_id: &str,
+) -> anyhow::Result<LabFeedback> {
+    if !all_labs().iter().any(|l| l.id == lab_id) {
+        anyhow::bail!("unknown lab id: {}", lab_id);
+    }
+    let mut fb = load_feedback(db, lab_id);
+    if fb.never_use_since == 0 {
+        fb.never_use_since = crate::storage::db::unix_now() as u64;
+    }
+    fb.retirement_candidate = fb.is_retirement_candidate();
+    let json = serde_json::to_string(&fb)?;
+    db.set_setting(&feedback_key(lab_id), &json)?;
+    Ok(fb)
+}
+
+pub fn retirement_candidates(db: &crate::storage::db::Db) -> Vec<String> {
+    all_labs()
+        .iter()
+        .filter(|l| {
+            let fb = load_feedback(db, l.id);
+            fb.is_retirement_candidate()
+        })
+        .map(|l| l.id.to_owned())
+        .collect()
+}
+
+#[cfg(test)]
+mod retirement_tests {
+    use super::*;
+
+    fn now() -> u64 { crate::storage::db::unix_now() as u64 }
+
+    #[test]
+    fn fresh_feedback_is_not_candidate() {
+        let fb = LabFeedback { never_use_since: now(), ..Default::default() };
+        assert!(!fb.is_retirement_candidate(),
+            "should not be a candidate immediately after first mark");
+    }
+
+    #[test]
+    fn feedback_past_threshold_is_candidate() {
+        let old_ts = now() - (RETIREMENT_THRESHOLD_DAYS + 1) * 86_400;
+        let fb = LabFeedback {
+            never_use_since:      old_ts,
+            marked_useful:        false,
+            retirement_candidate: false,
+        };
+        assert!(fb.is_retirement_candidate());
+    }
+
+    #[test]
+    fn useful_mark_clears_candidate() {
+        let old_ts = now() - (RETIREMENT_THRESHOLD_DAYS + 1) * 86_400;
+        let fb = LabFeedback {
+            never_use_since:      old_ts,
+            marked_useful:        true,
+            retirement_candidate: false,
+        };
+        assert!(!fb.is_retirement_candidate());
+    }
+}

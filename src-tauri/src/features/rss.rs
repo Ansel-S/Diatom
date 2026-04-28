@@ -29,7 +29,6 @@ pub struct Item {
     pub fetched_at: i64,
 }
 
-
 #[derive(Default)]
 pub struct RssStore {
     feeds: HashMap<String, Feed>,
@@ -71,8 +70,7 @@ impl RssStore {
         RssStore { feeds, items, guid_index }
     }
 
-    /// Add a new feed.  Category is None unless the user provides one.
-    /// Auto-categorisation has been removed in v0.14.1.
+    /// Add a new feed. Category is None unless the user provides one.
     pub fn add(&mut self, url: &str, category: Option<String>, db: &crate::storage::db::Db) -> Feed {
         let id  = crate::storage::db::new_id();
         let now = crate::storage::db::unix_now();
@@ -203,7 +201,6 @@ fn feed_to_raw(f: &Feed) -> crate::storage::db::RssFeedRaw {
         added_at: f.added_at,
     }
 }
-
 
 fn extract_channel_title(xml: &str) -> Option<String> { extract_tag(xml, "title") }
 

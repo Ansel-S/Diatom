@@ -216,6 +216,7 @@ async function tryTranslate(text) {
       const translation = json?.response?.trim();
       if (translation) appendTranslation(translation);
     }
+  } catch { /* translation unavailable */ }
 }
 
 function cancelSelection() {
@@ -312,4 +313,3 @@ function showError(msg) {
   document.body.appendChild(_overlay);
   setTimeout(dismissOverlay, 3000);
 }
-
