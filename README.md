@@ -2,9 +2,6 @@
 
 **A minimalist, privacy-first, local-AI browser.**
 
-[![License: BUSL-1.1](https://img.shields.io/badge/License-BUSL--1.1-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-1.78+-orange.svg)](https://rustup.rs)
-[![GPUI](https://img.shields.io/badge/GPUI-shell-purple.svg)](https://github.com/zed-industries/zed/tree/main/crates/gpui)
 [![Binary](https://img.shields.io/badge/binary-%E2%89%A410MB-green.svg)](#)
 [![Status](https://img.shields.io/badge/status-v1.0.0-green.svg)](AXIOMS.md)
 
@@ -27,11 +24,11 @@ Diatom runs entirely on your device. No accounts. No cloud sync. No analytics. N
 | Constraint | Enforcement |
 |---|---|
 | Zero data upload, no exceptions | `AppState` has no outbound API endpoints |
-| Zen Mode 50-character unlock ritual — never removable | `zen.js` character check has no bypass path |
-| No centralised sync server, ever | Architecture constraint: Mesh uses mDNS/BLE only |
-| Binary size ≤ 10 MB | CI gate: build fails if exceeded |
+| Zen Mode 50-character unlock ritual — never removable by default | `zen.js` character check has no bypass path |
+| No centralised sync server, ever | Nostr relay sync is end-to-end encrypted; Noise_XX P2P involves no third-party server |
+| Shell binary ≤ 10 MB | CI gate: build fails if exceeded |
 | No Blink/Chromium bundled | Size budget enforcement: Blink ≈ 200 MB, budget = 10 MB |
-| No WebExtensions compatibility layer | Absorptive architecture: features enter the kernel, not the extension store |
+| No WebExtensions compatibility layer | Features enter the kernel, not an extension store |
 | WebUSB / WebMIDI permanently disabled | `sw.js` + `diatom-api.js`: physical boundary |
 
 ---
@@ -40,45 +37,47 @@ Diatom runs entirely on your device. No accounts. No cloud sync. No analytics. N
 
 | Feature | Description |
 |---|---|
-| **Native ad blocking** | Aho-Corasick automaton — tracker requests are dropped before they reach the renderer |
-| **Fingerprint normalisation** | Canvas, WebGL, Audio, and navigator APIs normalised to the statistical mode of common desktop hardware. Deterministic and invisible to sites. |
-| **Museum (encrypted archive)** | AES-256-GCM encrypted page snapshots with tracker stripping, TF-IDF indexing, and FTS5 full-text search. |
-| **Native RSS** | Zero plugins. RSS 2.0 / Atom parser with TF-IDF auto-tagging and reading mode |
-| **Built-in 2FA** | TOTP/HOTP engine that auto-detects 2FA forms and fills in the code |
-| **Local AI (Resonance)** | OpenAI-compatible endpoint at `127.0.0.1:11435`. Curated models: Qwen 2.5 3B, Phi-4 Mini, Gemma 3 4B. Shared with VS Code / Obsidian via the same endpoint. |
-| **The Echo** | Weekly persona spectrum computed on-device in a Wasm sandbox. Raw data is zeroed after each computation. |
-| **DOM Crusher** | Ctrl+click any page element to permanently hide it. Rules persist per-domain |
-| **Zen Mode** | Blocks social and entertainment sites during focus sessions. Unlocking requires typing a 50-character intent declaration — this is a ritual, not a barrier |
-| **Vision Overlay** | Alt-drag any region → local Tesseract OCR → optional local translation. |
-| **Ghost Redirect** | Offline fallback: semantically matches a failed URL against the Museum and surfaces similar archived pages. |
-| **Compatibility Router** | Detects broken pages and hands off to the system browser with tracking parameters stripped. |
-| **Accessibility** | Full ARIA injection + keyboard navigation for every chrome element |
-| **Adaptive tab budget** | Resource-aware scaling; sleep timer shortens as the tab count approaches the configured limit. |
-| **diatom://labs** | 22 experimental features — AI, privacy, performance, sync, interface — each with an honest stability and risk rating |
-| **DevPanel** | Developer tools with one-click "Open in Zed". Resonance AI shares page context via `~/.diatom/resonance.sock`. |
-| **GPUI shell** | Tab bar, address bar, and toolbar rendered by GPUI. No HTML, CSS, or JS in the chrome layer. |
+| **Native ad blocking** | Aho-Corasick automaton — tracker requests are dropped before they reach the renderer. Ships a minimal built-in blocklist; subscribe to EasyList, EasyPrivacy, and others via `diatom://onboarding`. |
+| **Fingerprint normalisation** | Canvas, WebGL, AudioContext, and navigator APIs normalised to the statistical mode of common desktop hardware. Deterministic — every Diatom instance presents the same surface, making individual identification impractical. |
+| **Dynamic User-Agent (Sentinel)** | Polls Chrome and Safari version feeds hourly and synthesises a matching UA string. Diatom blends into the most common browser population rather than advertising itself. Polls use a generic Chrome UA so the poll traffic cannot fingerprint Diatom users. |
+| **Museum (encrypted archive)** | AES-256-GCM encrypted page snapshots with tracker stripping, TF-IDF indexing, and FTS5 full-text search. Exportable as WARC or standard HTML archive. |
+| **Museum sync** | Local-network sync via Noise_XX P2P (no third-party server). Cross-device async sync via user-chosen Nostr relay — relay sees only ciphertext. Both are opt-in. |
+| **Native RSS** | Zero plugins. RSS 2.0 / Atom parser with folder organisation and reading mode. |
+| **Built-in 2FA** | TOTP/HOTP engine that auto-detects 2FA forms and fills in the code. Exportable in Aegis JSON format. |
+| **Vault** | AES-256-GCM encrypted credential store. Autofill for login forms. |
+| **Local AI (Resonance)** | OpenAI-compatible API at `127.0.0.1:11435`. Curated models via Ollama: Qwen 2.5 3B, Phi-4 Mini, Gemma 3 4B. Also works with VS Code and Obsidian pointing to the same endpoint. |
+| **DOM Crusher** | Ctrl+click any page element to permanently hide it. Rules persist per-domain. |
+| **Zen Mode** | Blocks social and entertainment sites during focus sessions. Unlocking requires typing a 50-character intent declaration — a ritual, not a speed bump. Configurable site list. |
+| **Vision Overlay** | Alt-drag any region → local Tesseract OCR → optional local translation. No network request. |
+| **Peek preview** | Hovering a link for 600 ms shows a preview card. Previously-visited URLs resolve from the Museum cache with zero network requests. |
+| **ToS Red-Flag Auditor** | Automatically extracts and analyses Terms of Service on registration pages. Flags AI training consent, data-sharing clauses, perpetual IP licences, and more. |
+| **Breach monitor** | k-anonymity password check via HaveIBeenPwned (opt-in). Email breach check transmits the full address — explicit opt-in required. Results cached locally for 7 days. |
+| **DOM Boosts** | Per-domain CSS and JS overrides. Applied after page load; never transmitted anywhere. |
+| **Compatibility router** | Detects broken pages and hands off to the system browser with tracking parameters stripped. |
+| **Wasm plugin sandbox** | Local-path plugins run inside a Wasm sandbox: 16 MB memory limit, 100 ms CPU budget per call, no filesystem or network access. |
+| **Panic button** | Cmd/Ctrl+Shift+. hides all windows and replaces the active tab with a configurable decoy page. Optional full workspace wipe. |
+| **War Report** | Running tally of tracker blocks, fingerprint noise injections, estimated RAM saved, and estimated time saved. Computed locally from the block log. |
+| **Per-tab proxy** | Route individual tabs through a different proxy. Labs / Alpha. |
+| **DevPanel** | Developer tools with Console, Network, and Sources panels. Rendered by a GPUI sidecar process (`diatom-devpanel`). One-click "Open in Zed" integration. Local Resonance AI shares page context via the IPC bridge. |
+| **Accessibility** | Full ARIA injection and keyboard navigation for every chrome element. |
+| **Adaptive tab budget** | Resource-aware tab sleeping. Sleep timer shortens as tab count approaches the configured limit. |
 
 ---
 
 ## Honest limitations
 
-Diatom has edges. We tell you where they are.
+**Permanently out of scope:**
+- Widevine L1/L3 on Linux — Google does not license the CDM to open-source projects. DRM streaming (4K Netflix, etc.) is handled by handing off to the system browser with tracking parameters stripped.
+- Full iOS App Store distribution — Apple policy blocks custom Wasm kernels.
+- WebExtensions API — incompatible with the binary size budget and security model.
+- Bank U-Shield / NPAPI plugins — non-standard proprietary interfaces.
 
-**Permanently out of scope (architecture or legal constraints):**
-- Widevine L1/L3 on Linux — Google does not license the CDM to open-source projects
-- Full iOS App Store distribution — Apple policy blocks custom Wasm kernels
-- WebExtensions API — incompatible with the binary size budget and security model
-- Bank U-Shield / NPAPI plugins — non-standard proprietary interfaces
+**Filter rules:** Diatom ships a minimal built-in blocklist. For broader coverage use the Privacy Presets button at `diatom://onboarding` to subscribe to EasyList, EasyPrivacy, URLhaus, and others. Diatom is the downloader; you choose the lists.
 
-**Filter rules (v0.11.0+):**
-Diatom ships a minimal built-in blocklist. For broader coverage, use the Privacy Presets
-button (or `diatom://onboarding`) to subscribe to EasyList, EasyPrivacy, or URLhaus.
-Diatom is the downloader; you choose the lists.
-
-**System browser handoff** — for these cases, `cmd_compat_handoff` strips tracking parameters before yielding the render:
+**System browser handoff** — `cmd_compat_handoff` strips tracking parameters before yielding:
 - Legacy enterprise intranets with broken layout
 - Banking pages requiring hardware token plugins
-- DRM streaming (4K Netflix, etc.)
+- DRM streaming
 
 Privacy protection extends to the last moment before leaving Diatom.
 
@@ -104,7 +103,7 @@ xcode-select --install
 
 # Linux (Ubuntu / Debian)
 sudo apt install libwebkit2gtk-4.1-dev build-essential curl \
-  libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+  libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libgpu-dev
 
 # Windows
 # Install WebView2 Runtime (built into Windows 11)
@@ -114,12 +113,12 @@ sudo apt install libwebkit2gtk-4.1-dev build-essential curl \
 ### First run
 
 On first launch, Diatom opens the **Onboarding Wizard** (`diatom://onboarding`):
-1. Checks for Ollama (local AI)
+1. Checks for Ollama (local AI — optional)
 2. Sets your privacy posture (Balanced / Strict / Minimal)
 3. Subscribes to filter lists with one click
 4. Shows active features
 
-You can re-open it at any time via `diatom://onboarding`.
+Re-open at any time via `diatom://onboarding`.
 
 ### Development
 
@@ -133,7 +132,7 @@ cargo tauri dev
 
 ```bash
 cargo tauri build
-# Output: ≤ 10 MB binary
+# Output: ≤ 10 MB shell binary + separate diatom-devpanel binary
 # macOS:   Diatom.app + .dmg
 # Windows: Diatom.exe + .msi
 # Linux:   diatom.deb + .AppImage
@@ -153,28 +152,18 @@ ollama pull qwen2.5:3b         # faster, lower memory
 ollama pull gemma3:4b          # longer context, multilingual
 ```
 
-Once Ollama is running, Diatom auto-detects it. No configuration needed.
+Once Ollama is running, Diatom auto-detects it at `127.0.0.1:11434`. No configuration needed.
 
-Resonance Mode shortcuts (address bar):
-- `/scholar <question>` — answer from your local Museum only
-- `/debug <code>` — architecture and code analysis
-- `/scribe <draft>` — writing and editing
-- `/oracle <question>` — pure logical reasoning
+**Address-bar shortcuts** (legacy slash-commands still work):
 
-**Extreme Privacy Mode** — enable in `diatom://labs` to force all inference into the Wasm sandbox: no filesystem access, no network, only in-memory page content.
+| Input | Behaviour |
+|---|---|
+| `/scholar <question>` | Research from your local Museum only |
+| `/debug <issue>` | Page debug with console + network context |
+| `/scribe <draft>` | Writing and editing |
+| Natural language | Intent is detected automatically |
 
----
-
-## Wasm toolbox (no network required)
-
-Type directly in the address bar:
-
-```
-/json     Format and validate JSON
-/crypto   Base64 / SHA-256 / BLAKE3 / Hex conversion
-/math     Symbolic computation + unit conversion
-/img      Local image compression (MozJPEG / WebP)
-```
+**Extreme Privacy Mode** (Labs) forces all inference into a Wasm sandbox — no filesystem access, no network, only in-memory page context. Inference is 5–20× slower and limited to short prompts.
 
 ---
 
@@ -182,56 +171,74 @@ Type directly in the address bar:
 
 ```
 Diatom/
-├── src-tauri/         Tauri backend (blocker, privacy, storage, AI, sync)
+├── src-tauri/              Tauri backend
 │   └── src/
-│       ├── main.rs           Tauri entry + module registration
-│       ├── engine/           Blocker, bandwidth, ETag cache, monitor, GhostPipe, compat, plugins
-│       ├── privacy/          PrivacyConfig, fingerprint_norm, PIR, OHTTP, onion, threat, wifi
-│       ├── storage/          SQLite DB, vault, E-WBN freeze, storage guard, Museum versioning
-│       ├── ai/               SLM microkernel, download renamer, shadow index, MCP host
-│       ├── browser/          Tab lifecycle, tab limit, per-tab proxy, DOM crusher, boosts, a11y
-│       ├── auth/             TOTP/2FA, platform passkeys, domain trust levels
-│       ├── sync/             Nostr relay, Noise_XX P2P transport, knowledge marketplace
-│       └── features/         Zen, RSS, panic button, breach monitor, search, pricing radar,
-│                             ToS auditor, local file bridge, Sentinel, War Report, Labs, compliance
+│       ├── engine/         Blocker, bandwidth limiter, ETag cache, net monitor,
+│       │                   GhostPipe DoH, compat router, Wasm plugin sandbox
+│       ├── privacy/        PrivacyConfig, fingerprint normalisation, OHTTP,
+│       │                   onion mirror suggestions, threat list, Wi-Fi trust
+│       ├── storage/        SQLite DB, Vault, Museum freeze/thaw (E-WBN),
+│       │                   storage guard, Museum versioning, WARC export
+│       ├── ai/             SLM server, AI download renamer, Shadow Index, MCP host
+│       ├── browser/        Tab lifecycle, tab budget, per-tab proxy, DOM Crusher,
+│       │                   DOM Boosts, DevPanel bridge, accessibility
+│       ├── auth/           TOTP/2FA, platform passkeys, domain trust levels
+│       ├── sync/           Nostr relay sync, Noise_XX P2P transport, Museum Marketplace (Labs)
+│       └── features/       Zen, RSS, Panic button, Breach monitor, Search engines,
+│                           ToS auditor, Sentinel, War Report, Labs, Compliance registry
 │
-├── src/               Browser frontend (JS, CSS, UI pages)
-│   ├── main.js               Boot sequence
-│   ├── sw.js                 Service Worker (intercept + Ghost Redirect + Zen)
-│   ├── index.html            Browser chrome
-│   ├── diatom.css            Global styles
-│   ├── browser/              Core browser modules (ipc, tabs, hotkey, lustre…)
-│   ├── features/             Feature panels (echo, zen, dom-crusher…)
+├── src/                    Browser frontend (JS, CSS, UI pages)
+│   ├── main.js             Boot sequence
+│   ├── sw.js               Service worker — request interception, Zen enforcement
+│   ├── index.html          Browser chrome
+│   ├── browser/            Core browser modules (IPC, tabs, hotkey, IME fix, …)
+│   ├── features/           Feature panels (Zen, DOM Crusher, ToS auditor, …)
 │   ├── workers/
-│   │   └── core.worker.js    TF-IDF + OPFS + Echo scheduler + idle indexing
+│   │   └── core.worker.js  TF-IDF, OPFS, idle indexing
 │   └── ui/
-│       ├── about.html        diatom://about
-│       └── labs.html         diatom://labs
+│       ├── vault.html      diatom://vault
+│       ├── onboarding.html diatom://onboarding
+│       ├── home-base.html  diatom://home (new-tab page, Labs)
+│       ├── labs.html       diatom://labs
+│       └── about.html      diatom://about
 │
-├── shell/             First-party GPUI sidecar workspace
+├── shell/                  GPUI sidecar workspace
 │   └── crates/
-│       ├── diatom_bridge/    IPC protocol + Resonance UDS server
-│       ├── diatom_shell/     GPUI browser chrome (tab bar, toolbar, omnibox)
-│       └── diatom_devtools/  GPUI DevTools panel
-│
-├── zed-vendor/        Stripped Zed editor core (managed by strip-zed.sh)
-│   └── crates/        gpui, editor, lsp, rope, theme, …
+│       ├── diatom_bridge/  IPC protocol between Tauri backend and GPUI processes
+│       ├── diatom_devtools/ GPUI DevPanel (Console, Network, Sources)
+│       ├── diatom_agent/   Browser automation agent (planner, executor, tools)
+│       └── diatom_ui/      GPUI renderer facade — isolates DevPanel from GPUI churn
 │
 ├── scripts/
-│   └── strip-zed.sh   Strips Zed telemetry/collab crates before each build
+│   ├── strip-zed.sh        Strips Zed telemetry/collab crates before each build
+│   └── check-black-zone.sh Verifies no banned identifiers entered the codebase
 │
-├── AXIOMS.md          Project axioms — inviolable constraints
-├── INTEGRATION.md     Editor core integration guide
-├── README.md          This file — guide + philosophy
-└── LICENSE            BUSL-1.1, Change Date 2028, Change License MIT
+├── AXIOMS.md               Inviolable constraints — read before opening a PR
+└── LICENSE                 BUSL-1.1, Change Date 2028, Change License MIT
 ```
+
+---
+
+## Known outbound network calls
+
+All background network calls are documented here. None transmit user data (browsing history, identifiers, credentials).
+
+| Component | Endpoint | Purpose | Interval |
+|---|---|---|---|
+| Sentinel | `versionhistory.googleapis.com` | Chrome stable version (UA normalisation) | 1 hour |
+| Sentinel | `developer.apple.com/news/releases/rss/…` | Safari version (macOS UA normalisation) | 1 hour |
+| Sentinel | `chromereleases.googleblog.com/feeds/…` | CVE detection in current Chrome release | 1 hour |
+| Blocker | `easylist.to`, `filters.adtidy.org`, `raw.githubusercontent.com`, `pgl.yoyo.org`, `someonewhocares.org` | Filter list refresh | Configurable (default: 24 h) |
+| Breach | `api.pwnedpasswords.com/range/<5-char prefix>` | k-anonymity password check (opt-in) | On user action |
+| Breach | `haveibeenpwned.com/api/v3/breachedaccount/<email>` | Email breach check (explicit opt-in; full email transmitted) | On user action |
+
+All Sentinel and filter list requests use a generic Chrome UA — never the Diatom UA.
+
 ---
 
 ## Philosophy
 
 > *"A tool with boundaries is more trustworthy than a tool that is everywhere."*
-
-These principles shape every decision. They are documented here as rationale; as binding constraints they live in `AXIOMS.md`.
 
 **On centralisation:** Once a server stores your history, it acquires a god's-eye view. That view can be subpoenaed, sold, or leaked. The only safe central server is one that never exists.
 
@@ -239,15 +246,11 @@ These principles shape every decision. They are documented here as rationale; as
 
 **On fingerprint defence:** Random noise is detectable as noise. Normalisation to the statistical mode of common hardware is invisible — millions of real devices return the same values. Determinism is the stronger defence.
 
-**On URL stripping:** AI-generated stripping rules introduce two failure modes: removing a session token that logs the user out, or failing to recognise a novel tracker. Curated, human-reviewed Regex lists eliminate both failure modes. The rules are auditable; an AI's reasoning is not.
-
 **On local AI:** Cloud AI means your thoughts live on someone else's server. Diatom's AI is local-only, not as a feature limitation but as a privacy guarantee with no asterisk.
 
-**On DRM:** Widevine's absence is a deliberate boundary, not a technical problem to route around. Diatom's moral credibility depends on not cracking the CDM.
+**On DRM:** Widevine's absence is a deliberate boundary, not a technical problem to route around.
 
-**On funding:** Firefox's greatest tragedy was Google's money. Once that dependency forms, you lose the right to call their ad network a data-pollution honeypot. Diatom's business model, if one exists, must be fully aligned with user interests.
-
-**On attention:** "Earn tokens by watching ads" is still extracting you from the attention economy by re-selling your attention differently. Diatom's goal is extraction, not re-packaging.
+**On attention:** Diatom's goal is to return your attention to you — not to repackage it differently.
 
 ---
 
@@ -255,14 +258,4 @@ These principles shape every decision. They are documented here as rationale; as
 
 Read [AXIOMS.md](AXIOMS.md) before opening a PR. Every change must pass the axioms — the CI will catch most violations automatically.
 
-Bug reports and feature requests: [github.com/Ansel-S/Diatom/issues](https://github.com/Ansel-S/Diatom/issues)
-
----
-
-## License
-
-[Business Source License 1.1](LICENSE) — source-available, not open-source.
-
-- Personal use, research, and contributing to this repository: **always free**
-- Commercial browser products incorporating Diatom's features: **requires a separate licence**
-- Change Date: 2028. After that, the code converts to **MIT** permanently.
+Bug reports and feature requests: [github.com/asong56/Diatom/issues](https://github.com/asong56/Diatom/issues)
