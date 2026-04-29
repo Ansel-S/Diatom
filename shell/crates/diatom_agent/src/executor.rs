@@ -101,7 +101,7 @@ pub async fn decide(
                 content: last_error.clone(),
             });
             messages.push(ChatMessage {
-                role:    "user".into(),
+                role: "user".into(),
                 content: format!(
                     "That output was invalid ({last_error}). \
                      Reply with ONLY the corrected JSON object, nothing else."

@@ -88,7 +88,7 @@ base64 = "0.22"
 aho-corasick = "1"
 
 
-tokio-tungstenite = { version = "0.21", features = ["rustls-tls-native-roots"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 futures-util      = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 chrono    = { version = "0.4", features = ["serde"] }

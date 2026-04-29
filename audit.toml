@@ -21,4 +21,18 @@ ignore = [
     # Track upstream fix: bump tauri-utils once kuchikiki moves to
     # selectors >= 0.25 (which uses phf 0.11 / rand 0.8).
     "RUSTSEC-2026-0097",
+
+    # RUSTSEC-2024-0413: atk 0.18.2 — gtk-rs GTK3 bindings no longer maintained
+    #
+    # atk enters the tree transitively and cannot be removed without
+    # replacing the GTK3 back-end that wry/tauri depends on:
+    #
+    #   atk 0.18.2
+    #   └── gtk 0.18.2
+    #       └── wry 0.54.x
+    #           └── tauri-runtime-wry → tauri
+    #
+    # This is a maintenance warning, not a security vulnerability.
+    # Fix is blocked on tauri shipping a GTK4 / non-ATK back-end.
+    "RUSTSEC-2024-0413",
 ]

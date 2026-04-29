@@ -47,11 +47,7 @@ pub async fn plan(client: &DiatomSlmClient, goal: &str) -> Result<Vec<String>> {
     }
 }
 
-async fn try_plan(
-    client: &DiatomSlmClient,
-    goal: &str,
-    strict: bool,
-) -> Result<Vec<String>> {
+async fn try_plan(client: &DiatomSlmClient, goal: &str, strict: bool) -> Result<Vec<String>> {
     let system = if strict {
         "You are a browser-automation planner. \
          Respond with ONLY a JSON array of strings (no explanation, no markdown). \
@@ -68,7 +64,7 @@ async fn try_plan(
     let messages = vec![
         ChatMessage { role: "system".into(), content: system.into() },
         ChatMessage {
-            role:    "user".into(),
+            role: "user".into(),
             content: format!("Goal: {goal}"),
         },
     ];
