@@ -1,5 +1,4 @@
-
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -224,4 +223,3 @@ mod tests {
         assert!(!SecurityType::Wpa3.is_untrusted());
     }
 }
-

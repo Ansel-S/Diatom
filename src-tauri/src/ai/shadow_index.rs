@@ -1,6 +1,6 @@
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
@@ -158,9 +158,7 @@ pub fn generate_mermaid_divergence(
             _ => "●",
         };
         let title_short: String = p.title.chars().take(40).collect();
-        mermaid.push_str(&format!(
-            "    T --> P{i}[\"{lean_icon} {title_short}\"]\n",
-        ));
+        let _ = write!(mermaid, "    T --> P{i}[\"{lean_icon} {title_short}\"]\n");
     }
     mermaid
 }
@@ -191,4 +189,3 @@ mod tests {
         assert_ne!(h1, h2, "Different salts must produce different hashes");
     }
 }
-

@@ -1,7 +1,7 @@
-
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
 
 /// Supported proxy protocols.
@@ -83,18 +83,15 @@ impl TabProxyRegistry {
     }
 
     /// Generate a PAC script that routes each tab's traffic through its proxy.
-    /// Tabs without a proxy entry fall through to DIRECT.
-    ///
-    /// The PAC script uses a custom request header `X-Diatom-Tab-Id` injected
-    /// by the initialization_script to route connections.
     pub fn generate_pac_script(&self, tab_proxies: &[(String, ProxyConfig)]) -> String {
         let mut cases = String::new();
         for (tab_id, proxy) in tab_proxies {
-            cases.push_str(&format!(
+            let _ = write!(
+                cases,
                 "  if (myHostHeader === '{}') {{ return '{}'; }}\n",
                 tab_id,
                 proxy.pac_string()
-            ));
+            );
         }
         format!(
             "function FindProxyForURL(url, host) {{\n\
@@ -177,4 +174,3 @@ mod tests {
         assert!(reg.get("tab-1").is_none());
     }
 }
-

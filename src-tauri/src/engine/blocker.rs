@@ -1,8 +1,5 @@
 /// Generic Chrome UA used for filter list update requests.
-///
-/// Never the Diatom-specific UA — third-party filter list CDNs must not be
-/// able to fingerprint Diatom users from their update traffic.
-/// See AXIOMS.md §Known Outbound Network Calls.
+
 pub const FILTER_FETCH_UA: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
      AppleWebKit/537.36 (KHTML, like Gecko) \
@@ -182,9 +179,6 @@ pub fn parse_filter_list(text: &str) -> Vec<String> {
 }
 
 /// Fetch all built-in filter lists over HTTPS and build the live automaton.
-///
-/// Called once at startup. The live automaton replaces the static built-in
-/// patterns after the first successful fetch.
 pub async fn boot_fetch_builtin_lists(
     live_blocker: std::sync::Arc<std::sync::RwLock<Option<AhoCorasick>>>,
 ) {
@@ -435,8 +429,7 @@ pub fn strip_params(url: &str) -> String {
     crate::engine::url_stripper::strip(url).into_owned()
 }
 
-pub fn clean_headers(url: &str, extra_ua: Option<&str>) -> HeaderMap {
-    let _ = url;
+pub fn clean_headers(_url: &str, extra_ua: Option<&str>) -> HeaderMap {
     let mut headers = HeaderMap::new();
     let platform_ua = platform_fallback_ua();
     let ua = extra_ua.unwrap_or(platform_ua);
@@ -534,4 +527,3 @@ mod tests {
         assert!(dynamic_ua(&cache, true).is_none());
     }
 }
-

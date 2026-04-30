@@ -1,6 +1,6 @@
-
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::fmt::Write as _;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MuseumVersion {
@@ -55,15 +55,15 @@ pub fn compute_diff(old_text: &str, new_text: &str) -> String {
         if lcs_i < lcs.len() && oi < old_lines.len() && ni < new_lines.len()
             && old_lines[oi] == lcs[lcs_i] && new_lines[ni] == lcs[lcs_i]
         {
-            result.push_str(&format!(" {}\n", old_lines[oi]));
+            let _ = write!(result, " {}\n", old_lines[oi]);
             oi += 1; ni += 1; lcs_i += 1;
         } else if ni < new_lines.len()
             && (lcs_i >= lcs.len() || new_lines[ni] != lcs[lcs_i])
         {
-            result.push_str(&format!("+{}\n", new_lines[ni]));
+            let _ = write!(result, "+{}\n", new_lines[ni]);
             ni += 1;
         } else {
-            result.push_str(&format!("-{}\n", old_lines[oi]));
+            let _ = write!(result, "-{}\n", old_lines[oi]);
             oi += 1;
         }
         if result.len() > 65536 {
@@ -150,4 +150,3 @@ mod tests {
         assert!(matches!(tamper_verdict(0.5), TamperVerdict::MajorAlteration));
     }
 }
-

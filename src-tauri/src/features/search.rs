@@ -1,6 +1,6 @@
-
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::fmt::Write as _;
 
 /// Privacy tier classification shown in the onboarding wizard.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -146,13 +146,6 @@ pub fn build_suggest_url(engine: &SearchEngine, query: &str) -> Option<String> {
 }
 
 /// Percent-encode a query string for safe URL embedding.
-///
-
-/// percent-escape value for non-ASCII characters. This emits a single `%XX`
-/// for the Unicode code point, which is incorrect for multi-byte characters.
-/// For example, 'ñ' (U+00F1) was encoded as `%F1` instead of the correct
-/// UTF-8 bytes `%C3%B1`. Fix: iterate over the *bytes* of the UTF-8
-/// representation so each byte is correctly escaped.
 fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for byte in s.as_bytes() {
@@ -160,7 +153,7 @@ fn percent_encode(s: &str) -> String {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
             | b'-' | b'_' | b'.' | b'~' => out.push(*byte as char),
             b' ' => out.push('+'),
-            b => { out.push('%'); out.push_str(&format!("{:02X}", b)); }
+            b => { out.push('%'); let _ = write!(out, "{:02X}", b); }
         }
     }
     out
@@ -197,4 +190,3 @@ mod tests {
         assert_eq!(brave.unwrap().privacy_tier, PrivacyTier::Independent);
     }
 }
-
