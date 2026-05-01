@@ -85,7 +85,7 @@ mod url_stripping {
 
 #[cfg(test)]
 mod fingerprint_normalisation {
-    use diatom::engine::compat::FingerprintNorm;
+    use diatom::privacy::FingerprintNorm;
 
     #[test]
     fn generated_script_overrides_hardware_concurrency() {
