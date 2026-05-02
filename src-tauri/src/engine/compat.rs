@@ -111,7 +111,6 @@ pub fn system_browser_open(url: &str) -> Result<()> {
 /// Build the compat hint HTML banner injected into degraded pages.
 /// The "Open in system browser" button calls window.__diatom_compat_handoff()
 /// which is defined by diatom-api.js and invokes cmd_compat_handoff via IPC.
-
 pub fn compat_hint_banner(domain: &str) -> String {
     let escaped_domain = crate::utils::escape_html(domain);
     format!(
