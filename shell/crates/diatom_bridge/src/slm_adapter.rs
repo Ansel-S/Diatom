@@ -2,8 +2,8 @@ use anyhow::{Context, Result};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 
-/// The local SLM endpoint provided by Diatom's `slm.rs`.
-const SLM_BASE: &str = "http://127.0.0.1:11435";
+const MODELS_ENDPOINT: &str = "http://127.0.0.1:11435/v1/models";
+const CHAT_ENDPOINT: &str = "http://127.0.0.1:11435/v1/chat/completions";
 
 #[derive(Serialize)]
 struct ChatRequest<'a> {
@@ -67,13 +67,13 @@ impl DiatomSlmClient {
             id: String,
         }
 
-        match self.http.get(format!("{SLM_BASE}/v1/models")).send().await {
-            Ok(resp) => resp
+        match self.http.get(MODELS_ENDPOINT).send().await {
+            Ok(resp) if resp.status().is_success() => resp
                 .json::<ModelsResp>()
                 .await
                 .map(|r| r.data.into_iter().map(|m| m.id).collect())
                 .unwrap_or_default(),
-            Err(_) => vec![],
+            _ => vec![],
         }
     }
 
@@ -101,7 +101,7 @@ impl DiatomSlmClient {
 
         let resp: Resp = self
             .http
-            .post(format!("{SLM_BASE}/v1/chat/completions"))
+            .post(CHAT_ENDPOINT)
             .json(&body)
             .send()
             .await
@@ -138,7 +138,7 @@ impl DiatomSlmClient {
             };
 
             let mut resp = http
-                .post(format!("{SLM_BASE}/v1/chat/completions"))
+                .post(CHAT_ENDPOINT)
                 .json(&body)
                 .send()
                 .await
@@ -149,12 +149,14 @@ impl DiatomSlmClient {
             let mut buf = String::new();
             while let Some(bytes) = resp.chunk().await.context("read chunk")? {
                 buf.push_str(&String::from_utf8_lossy(&bytes));
+                
                 while let Some(nl) = buf.find("\n\n") {
-                    let line = buf.drain(..nl + 2).collect::<String>();
-                    let trimmed = line.trim();
+                    let trimmed = buf[..nl].trim();
+                    
                     if trimmed == "data: [DONE]" {
                         return;
                     }
+                    
                     if let Some(json_str) = trimmed.strip_prefix("data: ") {
                         if let Ok(parsed) = serde_json::from_str::<ChatChunk>(json_str) {
                             for choice in parsed.choices {
@@ -167,6 +169,8 @@ impl DiatomSlmClient {
                             }
                         }
                     }
+                    
+                    buf.drain(..nl + 2);
                 }
             }
         }

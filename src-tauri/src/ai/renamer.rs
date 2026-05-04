@@ -18,6 +18,9 @@ pub struct RenameResult {
     pub ai_generated: bool,
 }
 
+/// The SLM HTTP port used by Diatom's local inference server.
+const SLM_PORT: u16 = 11_435;
+
 /// Request a filename suggestion from the local SLM.
 ///
 /// Sends a structured JSON prompt to cmd_slm_chat. The model is instructed to
@@ -46,7 +49,7 @@ pub async fn suggest_via_slm(ctx: &DownloadContext) -> Result<RenameResult> {
     let resp: serde_json::Value = client
         .post(format!(
             "http://127.0.0.1:{}/v1/chat/completions",
-            crate::slm::SLM_PORT
+            SLM_PORT
         ))
         .json(&serde_json::json!({
             "model": "diatom-fast",
@@ -206,7 +209,7 @@ mod tests {
             !result
                 .contains('.')
                 .then_some(())
-                .map(|_| result.starts_with("."))
+                .map(|_| result.starts_with('.'))
                 .unwrap_or(false)
         );
     }

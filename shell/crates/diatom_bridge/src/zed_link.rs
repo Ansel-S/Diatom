@@ -12,16 +12,13 @@ const BROADCAST_CAP: usize = 4;
 
 /// Resolves the UDS socket path: `~/.diatom/resonance.sock`.
 pub fn resonance_sock_path() -> PathBuf {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| "/tmp".into());
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .unwrap_or_else(|| "/tmp".into());
     PathBuf::from(home).join(".diatom").join("resonance.sock")
 }
 
 /// Handle returned by [`ZedContextServer::start`].
-///
-/// Call `push(ctx)` whenever the browser context changes.
-/// The server runs on background tasks for its entire lifetime.
 pub struct ZedContextServer {
     tx: broadcast::Sender<ResonanceContext>,
 }
@@ -39,7 +36,9 @@ impl ZedContextServer {
         }
 
         if path.exists() {
-            std::fs::remove_file(&path).context("remove stale resonance.sock")?;
+            tokio::fs::remove_file(&path)
+                .await
+                .context("remove stale resonance.sock")?;
         }
 
         let listener = UnixListener::bind(&path).context("bind resonance.sock")?;
@@ -47,7 +46,8 @@ impl ZedContextServer {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                .await
                 .context("set resonance.sock permissions")?;
         }
 
@@ -90,15 +90,13 @@ async fn accept_loop(listener: UnixListener, tx: broadcast::Sender<ResonanceCont
 /// Serve one connected Zed client: forward every context snapshot until the
 /// client disconnects or an I/O error occurs.
 async fn serve_zed_client(
-    stream: tokio::net::UnixStream,
+    mut stream: tokio::net::UnixStream,
     mut rx: broadcast::Receiver<ResonanceContext>,
 ) {
-    let (_, mut writer) = tokio::io::split(stream);
-
     loop {
         match rx.recv().await {
             Ok(ctx) => {
-                if let Err(e) = transport::send(&mut writer, &ctx).await {
+                if let Err(e) = transport::send(&mut stream, &ctx).await {
                     log::debug!("[zed-link] client write error: {e}");
                     break;
                 }

@@ -1,7 +1,7 @@
 
 use anyhow::Result;
 use diatom_bridge::{BridgeServer, BrowserMessage, DevPanelMessage};
-use gpui::{App, AppContext, AsyncApp, Context, Entity, Task, Window, actions, px, size};
+use gpui::{App, AsyncApp, Context, Window, actions, px, size};
 
 use crate::bridge_dispatch::BridgeDispatch;
 use crate::console_panel::ConsolePanel;
@@ -11,7 +11,7 @@ use crate::sources_panel::SourcesPanel;
 actions!(devpanel, [ToggleConsole, ToggleNetwork, ToggleSources]);
 
 /// Called once from `main.rs` inside `App::run`.
-pub fn init(socket_path: String, cx: &mut App) {
+pub fn init(socket_path: String, auth_token: String, cx: &mut App) {
     cx.bind_keys([
         gpui::KeyBinding::new("cmd-shift-c", ToggleConsole, None),
         gpui::KeyBinding::new("cmd-shift-n", ToggleNetwork, None),
@@ -19,15 +19,15 @@ pub fn init(socket_path: String, cx: &mut App) {
     ]);
 
     cx.spawn(|cx| async move {
-        run(socket_path, cx).await.unwrap_or_else(|e| {
+        run(socket_path, auth_token, cx).await.unwrap_or_else(|e| {
             log::error!("[devpanel] fatal: {e:?}");
         });
     })
     .detach();
 }
 
-async fn run(socket_path: String, mut cx: AsyncApp) -> Result<()> {
-    let bridge = BridgeServer::start(&socket_path).await?;
+async fn run(socket_path: String, auth_token: String, mut cx: AsyncApp) -> Result<()> {
+    let bridge = BridgeServer::start(&socket_path, auth_token).await?;
     let outbound = bridge.outbound.clone();
 
     outbound.send(DevPanelMessage::Ready).await.ok();
@@ -63,4 +63,3 @@ async fn run(socket_path: String, mut cx: AsyncApp) -> Result<()> {
     let _ = dispatch;
     Ok(())
 }
-

@@ -5,7 +5,10 @@ pub mod slm_adapter;
 pub mod transport;
 pub mod zed_link;
 
+pub use server::BridgeServer;
+pub use zed_link::ZedContextServer;
 pub use client::BridgeClient;
+
 pub use protocol::{
     ActiveSource,
     BackendToShell,
@@ -20,5 +23,3 @@ pub use protocol::{
     ShellTab, // Shell ↔ Backend direction
     SlmMessage,
 };
-pub use server::BridgeServer;
-pub use zed_link::ZedContextServer;

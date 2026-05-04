@@ -23,150 +23,56 @@ pub struct BridgeClient {
 
 impl BridgeClient {
     /// Connect to a DevPanel listening at `socket_path`.
-    ///
-    /// `auth_token` must be the same value that was passed to the DevPanel
-    /// process via `--auth-token`. It is sent during the handshake and never
-    /// transmitted again after the connection is established.
-    ///
-    /// Retries up to `retries` times with 100 ms back-off (the DevPanel may
-    /// still be starting its GPUI event loop when Diatom calls connect).
     #[cfg(unix)]
-    pub async fn connect(socket_path: &str, auth_token: &str, retries: u8) -> Result<Self> {
+    pub async fn connect(socket_path: &str, auth_token: &str, mut retries: u8) -> Result<Self> {
         use tokio::net::UnixStream;
         use tokio::time::sleep;
 
-        let mut stream = None;
-        for attempt in 0..=retries {
+        let stream = loop {
             match UnixStream::connect(socket_path).await {
-                Ok(s) => {
-                    stream = Some(s);
-                    break;
-                }
-                Err(e) if attempt < retries => {
-                    log::debug!("[bridge-client] connect attempt {attempt} failed ({e}), retrying");
+                Ok(s) => break s,
+                Err(e) if retries > 0 => {
+                    log::debug!("[bridge-client] connect failed ({e}), retrying...");
                     sleep(Duration::from_millis(100)).await;
+                    retries -= 1;
                 }
                 Err(e) => return Err(e).context("connect to DevPanel socket"),
             }
-        }
-        let stream = stream.expect("loop exited only on success or error");
-        let (mut reader, mut writer) = tokio::io::split(stream);
+        };
+
+        let (mut reader, mut writer) = stream.into_split();
 
         // --- Handshake before any message traffic ---
         perform_handshake(&mut reader, &mut writer, auth_token).await?;
 
-        let (inbound_tx, inbound_rx) = mpsc::channel::<DevPanelMessage>(CHAN_CAP);
-        let (outbound_tx, outbound_rx) = mpsc::channel::<BrowserMessage>(CHAN_CAP);
+        let (inbound, outbound) = spawn_io_tasks(reader, writer);
 
-        // Read task: forward DevPanelMessages from the socket to `inbound`.
-        tokio::spawn(async move {
-            loop {
-                match transport::recv::<_, DevPanelMessage>(&mut reader).await {
-                    Ok(Some(msg)) => {
-                        if inbound_tx.send(msg).await.is_err() {
-                            break;
-                        }
-                    }
-                    Ok(None) => {
-                        log::info!("[bridge-client] DevPanel disconnected");
-                        break;
-                    }
-                    Err(e) => {
-                        log::error!("[bridge-client] recv: {e}");
-                        break;
-                    }
-                }
-            }
-        });
-
-        // Write task: drain `outbound` and send BrowserMessages to the DevPanel.
-        tokio::spawn(async move {
-            let mut rx = outbound_rx;
-            while let Some(msg) = rx.recv().await {
-                if let Err(e) = transport::send(&mut writer, &msg).await {
-                    log::error!("[bridge-client] send: {e}");
-                    break;
-                }
-            }
-        });
-
-        Ok(Self {
-            inbound: inbound_rx,
-            outbound: outbound_tx,
-        })
+        Ok(Self { inbound, outbound })
     }
 
     #[cfg(windows)]
-    pub async fn connect(pipe_name: &str, auth_token: &str, retries: u8) -> Result<Self> {
+    pub async fn connect(pipe_name: &str, auth_token: &str, mut retries: u8) -> Result<Self> {
         use tokio::net::windows::named_pipe::ClientOptions;
         use tokio::time::sleep;
 
-        let mut pipe = None;
-        for attempt in 0..=retries {
+        let pipe = loop {
             match ClientOptions::new().open(pipe_name) {
-                Ok(p) => {
-                    pipe = Some(p);
-                    break;
-                }
-                Err(e) if attempt < retries => {
+                Ok(p) => break p,
+                Err(e) if retries > 0 => {
                     sleep(Duration::from_millis(100)).await;
-                    let _ = e;
+                    retries -= 1;
                 }
                 Err(e) => return Err(e).context("connect to DevPanel pipe"),
             }
-        }
-        let pipe = pipe.expect("loop exits on success or early return");
+        };
 
-        use std::sync::Arc;
-        use tokio::sync::Mutex;
-        let pipe = Arc::new(Mutex::new(pipe));
+        let (mut reader, mut writer) = tokio::io::split(pipe);
 
-        // Handshake — borrow exclusively for HS phase.
-        {
-            let mut guard = pipe.lock().await;
-            let (mut r, mut w) = tokio::io::split(&mut *guard);
-            perform_handshake(&mut r, &mut w, auth_token).await?;
-        }
+        perform_handshake(&mut reader, &mut writer, auth_token).await?;
 
-        let (inbound_tx, inbound_rx) = mpsc::channel::<DevPanelMessage>(CHAN_CAP);
-        let (outbound_tx, outbound_rx) = mpsc::channel::<BrowserMessage>(CHAN_CAP);
+        let (inbound, outbound) = spawn_io_tasks(reader, writer);
 
-        let read_pipe = Arc::clone(&pipe);
-        tokio::spawn(async move {
-            loop {
-                let mut guard = read_pipe.lock().await;
-                match transport::recv::<_, DevPanelMessage>(&mut *guard).await {
-                    Ok(Some(msg)) => {
-                        drop(guard);
-                        if inbound_tx.send(msg).await.is_err() {
-                            break;
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(e) => {
-                        log::error!("[bridge-client] recv: {e}");
-                        break;
-                    }
-                }
-            }
-        });
-
-        let write_pipe = Arc::clone(&pipe);
-        tokio::spawn(async move {
-            let mut rx = outbound_rx;
-            while let Some(msg) = rx.recv().await {
-                let mut guard = write_pipe.lock().await;
-                if let Err(e) = transport::send(&mut *guard, &msg).await {
-                    log::error!("[bridge-client] send: {e}");
-                    break;
-                }
-            }
-        });
-
-        Ok(Self {
-            inbound: inbound_rx,
-            outbound: outbound_tx,
-        })
+        Ok(Self { inbound, outbound })
     }
 
     /// Convenience wrapper — fire-and-forget a message to the DevPanel.
@@ -178,14 +84,56 @@ impl BridgeClient {
     }
 }
 
+// ── Common IO Tasks Spawner ──────────────────────────────────────────────
+
+fn spawn_io_tasks<R, W>(
+    mut reader: R,
+    mut writer: W,
+) -> (mpsc::Receiver<DevPanelMessage>, mpsc::Sender<BrowserMessage>)
+where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+    W: tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let (inbound_tx, inbound_rx) = mpsc::channel::<DevPanelMessage>(CHAN_CAP);
+    let (outbound_tx, outbound_rx) = mpsc::channel::<BrowserMessage>(CHAN_CAP);
+
+    // Read task
+    tokio::spawn(async move {
+        loop {
+            match transport::recv::<_, DevPanelMessage>(&mut reader).await {
+                Ok(Some(msg)) => {
+                    if inbound_tx.send(msg).await.is_err() {
+                        break; // Receiver dropped, exit cleanly
+                    }
+                }
+                Ok(None) => {
+                    log::info!("[bridge-client] DevPanel disconnected");
+                    break;
+                }
+                Err(e) => {
+                    log::error!("[bridge-client] recv: {e}");
+                    break;
+                }
+            }
+        }
+    });
+
+    // Write task
+    tokio::spawn(async move {
+        let mut rx = outbound_rx;
+        while let Some(msg) = rx.recv().await {
+            if let Err(e) = transport::send(&mut writer, &msg).await {
+                log::error!("[bridge-client] send: {e}");
+                break;
+            }
+        }
+    });
+
+    (inbound_rx, outbound_tx)
+}
+
 // ── Handshake helper (client side) ───────────────────────────────────────────
 
-/// Complete the client side of the authentication handshake.
-///
-/// 1. Waits for `HandshakeMessage::Challenge` from the server.
-/// 2. Sends `HandshakeMessage::Response { token: auth_token }`.
-/// 3. Waits for `HandshakeMessage::Accepted`.
-/// 4. Returns `Ok(())` on success, `Err` on any failure.
 async fn perform_handshake<R, W>(reader: &mut R, writer: &mut W, auth_token: &str) -> Result<()>
 where
     R: tokio::io::AsyncRead + Unpin,

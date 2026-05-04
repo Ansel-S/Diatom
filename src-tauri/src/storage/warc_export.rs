@@ -42,6 +42,33 @@ use uuid::Uuid;
 use crate::storage::db::{BundleRow, Db};
 use crate::storage::freeze::thaw_bundle;
 
+/// List all Museum bundles across every workspace (WARC export is workspace-agnostic).
+fn list_all_bundles(db: &Db) -> Result<Vec<BundleRow>> {
+    let conn = db.0.lock().unwrap();
+    let mut stmt = conn.prepare(
+        "SELECT id,url,title,content_hash,bundle_path,tfidf_tags,bundle_size,frozen_at,\
+                workspace_id,index_tier,last_accessed_at
+         FROM museum_bundles ORDER BY frozen_at ASC",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(BundleRow {
+            id: r.get(0)?,
+            url: r.get(1)?,
+            title: r.get(2)?,
+            content_hash: r.get(3)?,
+            bundle_path: r.get(4)?,
+            tfidf_tags: r.get(5)?,
+            bundle_size: r.get(6)?,
+            frozen_at: r.get(7)?,
+            workspace_id: r.get(8)?,
+            index_tier: r.get::<_, String>(9).unwrap_or_else(|_| "hot".to_string()),
+            last_accessed_at: r.get::<_, Option<i64>>(10).unwrap_or(None),
+        })
+    })?;
+    rows.collect::<rusqlite::Result<_>>()
+        .context("list_all_bundles for WARC export")
+}
+
 /// Export all Museum bundles in `db` to a single WARC 1.1 file at `dest`.
 ///
 /// Bundles whose encrypted content cannot be decrypted (e.g. because the
@@ -55,7 +82,7 @@ pub fn export_warc(
     master_key: &[u8; 32],
     dest: &Path,
 ) -> Result<(usize, usize)> {
-    let rows = db.list_bundles().context("list Museum bundles")?;
+    let rows = list_all_bundles(db).context("list Museum bundles")?;
 
     if rows.is_empty() {
         // Write a valid but empty WARC (just the warcinfo record).
@@ -239,10 +266,14 @@ mod tests {
             id: "test-id".to_owned(),
             url: "https://example.com/page".to_owned(),
             title: "Example Page".to_owned(),
-            frozen_at: 1705320000,
+            content_hash: "abc123".to_owned(),
             bundle_path: "test.ewbn".to_owned(),
+            tfidf_tags: "[]".to_owned(),
             bundle_size: 0,
+            frozen_at: 1705320000,
             workspace_id: "default".to_owned(),
+            index_tier: "hot".to_owned(),
+            last_accessed_at: None,
         };
         let mut buf: Vec<u8> = Vec::new();
         write_response_record(&mut buf, &row, "<html><body>hello</body></html>").unwrap();

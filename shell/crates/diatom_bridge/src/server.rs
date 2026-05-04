@@ -26,12 +26,6 @@ pub struct BridgeServer {
 impl BridgeServer {
     /// Bind to `socket_path` and begin accepting exactly one connection
     /// (Diatom and DevPanel are always 1:1).
-    ///
-    /// `auth_token` must match the value passed to this DevPanel process via
-    /// `--auth-token`. Any connecting client that cannot present the correct
-    /// token is rejected and disconnected before any messages are processed.
-    ///
-    /// Returns immediately; the actual I/O runs on background tokio tasks.
     #[cfg(unix)]
     pub async fn start(socket_path: impl AsRef<Path>, auth_token: String) -> Result<Self> {
         use tokio::net::UnixListener;
@@ -44,9 +38,7 @@ impl BridgeServer {
 
         let listener = UnixListener::bind(path).context("bind Unix socket")?;
 
-        // Restrict socket to owner only (belt-and-suspenders on top of the
-        // token handshake — an attacker can't even connect from another user).
-        #[cfg(unix)]
+        // Restrict socket to owner only
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
@@ -88,14 +80,6 @@ impl BridgeServer {
 
 // ── Handshake helper ──────────────────────────────────────────────────────────
 
-/// Perform the server side of the authentication handshake on `writer`/`reader`.
-///
-/// 1. Sends `HandshakeMessage::Challenge`.
-/// 2. Waits up to `HANDSHAKE_TIMEOUT_MS` for a `Response { token }`.
-/// 3. Validates the token in constant time.
-/// 4. Sends `Accepted` or `Rejected` and returns `Ok(true)` / `Ok(false)`.
-///
-/// All I/O errors are surfaced as `Err`.
 async fn perform_handshake<R, W>(reader: &mut R, writer: &mut W, auth_token: &str) -> Result<bool>
 where
     R: tokio::io::AsyncRead + Unpin,
@@ -118,7 +102,7 @@ where
         bail!("handshake: peer closed connection before sending Response");
     };
 
-    // Step 3 — validate token in constant time to prevent timing side-channels.
+    // Step 3 — validate token in constant time.
     let token_ok = match msg {
         HandshakeMessage::Response { token } => {
             constant_time_eq(token.as_bytes(), auth_token.as_bytes())
@@ -148,7 +132,6 @@ where
     }
 }
 
-/// Constant-time byte-slice comparison to prevent timing-based token oracle.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
@@ -177,9 +160,8 @@ async fn accept_unix(
         }
     };
 
-    let (mut reader, mut writer) = tokio::io::split(stream);
+    let (mut reader, mut writer) = stream.into_split();
 
-    // --- Handshake must succeed before normal I/O begins ---
     match perform_handshake(&mut reader, &mut writer, &auth_token).await {
         Ok(true) => log::info!("[bridge-server] handshake accepted"),
         Ok(false) => {
@@ -199,7 +181,7 @@ async fn accept_unix(
 
 #[cfg(windows)]
 async fn accept_windows(
-    mut server: tokio::net::windows::named_pipe::NamedPipeServer,
+    server: tokio::net::windows::named_pipe::NamedPipeServer,
     auth_token: String,
     inbound_tx: mpsc::Sender<BrowserMessage>,
     outbound_rx: mpsc::Receiver<DevPanelMessage>,
@@ -209,104 +191,53 @@ async fn accept_windows(
         return;
     }
 
-    use std::sync::Arc;
-    use tokio::sync::Mutex;
-    let pipe = Arc::new(Mutex::new(server));
+    let (mut reader, mut writer) = tokio::io::split(server);
 
-    // Handshake: borrow the pipe exclusively for the synchronous HS phase.
-    {
-        let mut guard = pipe.lock().await;
-        let (mut r, mut w) = tokio::io::split(&mut *guard);
-        match perform_handshake(&mut r, &mut w, &auth_token).await {
-            Ok(true) => log::info!("[bridge-server] handshake accepted"),
-            Ok(false) => {
-                log::warn!("[bridge-server] handshake rejected — dropping connection");
-                return;
-            }
-            Err(e) => {
-                log::error!("[bridge-server] handshake error: {e}");
-                return;
-            }
+    match perform_handshake(&mut reader, &mut writer, &auth_token).await {
+        Ok(true) => log::info!("[bridge-server] handshake accepted"),
+        Ok(false) => {
+            log::warn!("[bridge-server] handshake rejected — dropping connection");
+            return;
+        }
+        Err(e) => {
+            log::error!("[bridge-server] handshake error: {e}");
+            return;
         }
     }
 
-    // Post-handshake I/O (Windows uses Arc<Mutex<_>> to share the pipe).
-    let read_pipe = Arc::clone(&pipe);
-    let write_pipe = Arc::clone(&pipe);
-
-    let read_task = tokio::spawn(async move {
-        loop {
-            let mut guard = read_pipe.lock().await;
-            match transport::recv::<_, BrowserMessage>(&mut *guard).await {
-                Ok(Some(msg)) => {
-                    drop(guard);
-                    if inbound_tx.send(msg).await.is_err() {
-                        break;
-                    }
-                }
-                Ok(None) => break,
-                Err(e) => {
-                    log::error!("[bridge-server] recv: {e}");
-                    break;
-                }
-            }
-        }
-    });
-
-    let mut outbound_rx = outbound_rx;
-    let write_task = tokio::spawn(async move {
-        while let Some(msg) = outbound_rx.recv().await {
-            let mut guard = write_pipe.lock().await;
-            if let Err(e) = transport::send(&mut *guard, &msg).await {
-                log::error!("[bridge-server] send: {e}");
-                break;
-            }
-        }
-    });
-
-    tokio::select! {
-        _ = read_task  => {},
-        _ = write_task => {},
-    }
+    run_io_loop(reader, writer, inbound_tx, outbound_rx).await;
 }
 
-// ── Shared post-handshake I/O loop (Unix) ────────────────────────────────────
+// ── Shared post-handshake I/O loop ───────────────────────────────────────────
 
-#[cfg(unix)]
 async fn run_io_loop<R, W>(
-    reader: R,
-    writer: W,
+    mut reader: R,
+    mut writer: W,
     inbound_tx: mpsc::Sender<BrowserMessage>,
     mut outbound_rx: mpsc::Receiver<DevPanelMessage>,
 ) where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
     W: tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
-    let mut reader = reader;
-    let mut writer = writer;
-
-    let read_task = {
-        let tx = inbound_tx;
-        tokio::spawn(async move {
-            loop {
-                match transport::recv::<_, BrowserMessage>(&mut reader).await {
-                    Ok(Some(msg)) => {
-                        if tx.send(msg).await.is_err() {
-                            break;
-                        }
-                    }
-                    Ok(None) => {
-                        log::info!("[bridge-server] peer closed connection");
-                        break;
-                    }
-                    Err(e) => {
-                        log::error!("[bridge-server] recv error: {e}");
+    let read_task = tokio::spawn(async move {
+        loop {
+            match transport::recv::<_, BrowserMessage>(&mut reader).await {
+                Ok(Some(msg)) => {
+                    if inbound_tx.send(msg).await.is_err() {
                         break;
                     }
                 }
+                Ok(None) => {
+                    log::info!("[bridge-server] peer closed connection");
+                    break;
+                }
+                Err(e) => {
+                    log::error!("[bridge-server] recv error: {e}");
+                    break;
+                }
             }
-        })
-    };
+        }
+    });
 
     let write_task = tokio::spawn(async move {
         while let Some(msg) = outbound_rx.recv().await {

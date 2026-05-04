@@ -11,20 +11,22 @@ where
     W: AsyncWrite + Unpin,
     T: Serialize,
 {
-    let body = serde_json::to_vec(msg).context("serialize message")?;
-    if body.len() > MAX_FRAME {
+    let mut buf = Vec::with_capacity(1024);
+    buf.extend_from_slice(&[0, 0, 0, 0]);
+    serde_json::to_writer(&mut buf, msg).context("serialize message")?;
+
+    let len = buf.len() - 4;
+    if len > MAX_FRAME {
         bail!(
             "message too large: {} bytes (max {})",
-            body.len(),
+            len,
             MAX_FRAME
         );
     }
-    let len = body.len() as u32;
-    writer
-        .write_all(&len.to_be_bytes())
-        .await
-        .context("write length prefix")?;
-    writer.write_all(&body).await.context("write body")?;
+
+    buf[..4].copy_from_slice(&(len as u32).to_be_bytes());
+
+    writer.write_all(&buf).await.context("write frame")?;
     Ok(())
 }
 
@@ -41,28 +43,28 @@ where
         Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
         Err(e) => return Err(e).context("read length prefix"),
     }
+    
     let len = u32::from_be_bytes(len_buf) as usize;
     if len > MAX_FRAME {
         bail!("incoming frame too large: {} bytes", len);
     }
+    
     let mut body = vec![0u8; len];
     reader
         .read_exact(&mut body)
         .await
         .context("read frame body")?;
+        
     let msg = serde_json::from_slice(&body).context("deserialize message")?;
     Ok(Some(msg))
 }
 
 /// Returns the platform-appropriate socket path for the given Diatom instance.
-///
-/// On macOS/Linux: `$TMPDIR/diatom-devpanel-<pid>.sock`
-/// On Windows    : `\\.\pipe\diatom-devpanel-<pid>`
 pub fn socket_path(pid: u32) -> String {
     #[cfg(unix)]
     {
-        let tmp = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".into());
-        format!("{}/diatom-devpanel-{}.sock", tmp, pid)
+        let tmp = std::env::temp_dir();
+        format!("{}/diatom-devpanel-{}.sock", tmp.display(), pid)
     }
     #[cfg(windows)]
     {
